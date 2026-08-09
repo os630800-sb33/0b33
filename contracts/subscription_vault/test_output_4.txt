@@ -1,4 +1,4 @@
-   Compiling subscription_vault v0.1.0 (C:\Users\ADMIN\Desktop\mide-drips\stellabill-contracts\contracts\subscription_vault)
+   Compiling subscription_vault v0.1.0 (C:\Users\ADMIN\Desktop\mide-drips\0b33\contracts\subscription_vault)
 warning: unused variable: `admin`
    --> contracts\subscription_vault\src\test.rs:557:26
     |
@@ -33,7 +33,7 @@ warning: unused variable: `env`
 
 warning: `subscription_vault` (lib test) generated 5 warnings (run `cargo fix --lib -p subscription_vault --tests` to apply 5 suggestions)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 38.69s
-     Running unittests src\lib.rs (C:\Users\ADMIN\Desktop\mide-drips\stellabill-contracts\target\debug\deps\subscription_vault-7688747a7cbe44e2.exe)
+     Running unittests src\lib.rs (C:\Users\ADMIN\Desktop\mide-drips\0b33\target\debug\deps\subscription_vault-7688747a7cbe44e2.exe)
 
 running 103 tests
 test test::test_can_transition_helper ... ok

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/install_git_hooks.sh
 #
-# Idempotent installer for the stellabill-contracts Git hooks.
+# Idempotent installer for the 0b33 Git hooks.
 #
 # Usage:
 #   ./scripts/install_git_hooks.sh          # install / re-install

@@ -1,6 +1,6 @@
 # Auto-Renewal Disable Flag and Renewal Window
 
-Implements issue [#562](https://github.com/Stellabill/stellabill-contracts/issues/562).
+Implements issue [#562](https://github.com/Stellabill/0b33/issues/562).
 
 This document describes the `auto_renew` flag on `Subscription`, the renewal
 window mechanism, and the `set_auto_renew` entrypoint.

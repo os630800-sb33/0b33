@@ -46,7 +46,7 @@ code in this repository, including:
 ### Preferred channel — GitHub Private Security Advisory
 
 1. Go to **Security → Advisories → New draft security advisory** on this repo:
-   `https://github.com/Stellabill/stellabill-contracts/security/advisories/new`
+   `https://github.com/Stellabill/0b33/security/advisories/new`
 2. Fill in title, severity estimate, affected versions, and a description of
    the vulnerability and reproduction steps.
 3. We will acknowledge receipt and invite you to the private advisory thread.

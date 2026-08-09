@@ -1,4 +1,4 @@
-   Compiling subscription_vault v0.1.0 (C:\Users\ADMIN\Desktop\mide-drips\stellabill-contracts\contracts\subscription_vault)
+   Compiling subscription_vault v0.1.0 (C:\Users\ADMIN\Desktop\mide-drips\0b33\contracts\subscription_vault)
 warning: unused import: `FromVal`
  --> contracts\subscription_vault\src\test.rs:8:43
   |

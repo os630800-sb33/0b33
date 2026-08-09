@@ -1,4 +1,4 @@
-   Compiling subscription_vault v0.1.0 (C:\Users\ADMIN\Desktop\mide-drips\stellabill-contracts\contracts\subscription_vault)
+   Compiling subscription_vault v0.1.0 (C:\Users\ADMIN\Desktop\mide-drips\0b33\contracts\subscription_vault)
 error[E0599]: no method named `into_val` found for struct `soroban_sdk::Symbol` in the current scope
    --> contracts\subscription_vault\src\test.rs:843:40
     |

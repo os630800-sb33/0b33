@@ -1,5 +1,5 @@
-﻿cargo : warning: C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\Cargo.toml: file 
-`C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\benches\ttl_extension.rs` found 
+cargo : warning: C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\Cargo.toml: file 
+`C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\benches\ttl_extension.rs` found 
 to be present in multiple build targets:
 At line:1 char:86
 + ... bill-contracts"; cargo check --lib -p subscription_vault 2>&1 | Out-F ...
@@ -9,18 +9,18 @@ At line:1 char:86
  
   * `integration-test` target `ttl_extension`
   * `bench` target `ttl_extension`
-warning: C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\Cargo.toml: file 
-`C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\benches\charge_cold_warm.rs` 
+warning: C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\Cargo.toml: file 
+`C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\benches\charge_cold_warm.rs` 
 found to be present in multiple build targets:
   * `integration-test` target `charge_cold_warm`
   * `bench` target `charge_cold_warm`
-warning: C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\Cargo.toml: file 
-`C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\benches\idem_lookup.rs` found to 
+warning: C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\Cargo.toml: file 
+`C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\benches\idem_lookup.rs` found to 
 be present in multiple build targets:
   * `integration-test` target `idem_lookup`
   * `bench` target `idem_lookup`
     Checking subscription_vault v0.1.0 
-(C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault)
+(C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault)
 error[E0425]: cannot find type `MerchantMultiSigConfig` in this scope
    --> contracts\subscription_vault\src\merchant.rs:407:77
     |

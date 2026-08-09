@@ -624,7 +624,7 @@ The vault maintains token-isolated accounting buckets:
 Let me create the TODO.md first to track my progress, then the document.
 
 <create_file>
-<path>c:/Users/FAUZIYAT/Desktop/stellabill-contracts/TODO.md</path>
+<path>c:/Users/FAUZIYAT/Desktop/0b33/TODO.md</path>
 <content>
 # Multi-Token Onboarding Checklist — Task Progress
 

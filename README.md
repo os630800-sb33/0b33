@@ -104,8 +104,8 @@ See [subscription_lifecycle.md](docs/subscription_lifecycle.md) for the full sta
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_ORG/stellabill-contracts.git
-cd stellabill-contracts
+git clone https://github.com/YOUR_ORG/0b33.git
+cd 0b33
 ```
 
 (Replace `YOUR_ORG` with the actual org or user.)
@@ -221,7 +221,7 @@ We welcome contributions from the community. Here’s how to get started and how
 ### Before you start
 
 - Read this README and the [Stellar / Soroban docs](https://developers.stellar.org/docs).
-- Check [GitHub Issues](https://github.com/YOUR_ORG/stellabill-contracts/issues) for “good first issue” or “help wanted” labels.
+- Check [GitHub Issues](https://github.com/YOUR_ORG/0b33/issues) for “good first issue” or “help wanted” labels.
 - If you want to change behavior or add a feature, open an issue first so we can align on design.
 
 ### Development workflow
@@ -250,7 +250,7 @@ We welcome contributions from the community. Here’s how to get started and how
 
 ### Getting help
 
-- **Questions**: Open a [GitHub Discussion](https://github.com/YOUR_ORG/stellabill-contracts/discussions) or an issue with the “question” label.
+- **Questions**: Open a [GitHub Discussion](https://github.com/YOUR_ORG/0b33/discussions) or an issue with the “question” label.
 - **Bugs**: Open an issue with steps to reproduce, environment (Rust/Soroban versions), and logs if relevant.
 - **Ideas**: Use Discussions or an issue with “enhancement” so we can track and discuss.
 
@@ -263,7 +263,7 @@ We expect all contributors and maintainers to be respectful and inclusive. By pa
 ## Project layout
 
 ```
-stellabill-contracts/
+0b33/
 ├── Cargo.toml                 # Workspace root; lists contract crates
 ├── Cargo.lock                 # Locked dependencies (reproducible builds)
 ├── README.md                  # This file

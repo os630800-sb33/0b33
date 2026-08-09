@@ -830,7 +830,7 @@ stellar contract invoke   --id "$CONTRACT_ID"   --source "$ADMIN_SECRET"   --rpc
 ### Runbook Feedback
 
 If this runbook is unclear, incorrect, or missing a scenario:
-- Open an issue: `https://github.com/Stellabill/stellabill-contracts/issues`
+- Open an issue: `https://github.com/Stellabill/0b33/issues`
 - Tag: `runbook`, `oracle`, `on-call`
 - Assign: `@protocol-team`
 

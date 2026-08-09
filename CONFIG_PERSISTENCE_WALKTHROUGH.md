@@ -20,7 +20,7 @@ For long-lived deployments, keeping these critical configuration parameters in i
 
 To facilitate this change safely and without downtime, we implemented a one-shot configuration migration path and fallback config reads.
 
-### A. Storage Helper Functions ([admin.rs](file:///home/gamp/Documents/Collab-Works/drips/stellabill-contracts/contracts/subscription_vault/src/admin.rs))
+### A. Storage Helper Functions ([admin.rs](file:///home/gamp/Documents/Collab-Works/drips/0b33/contracts/subscription_vault/src/admin.rs))
 Rather than accessing storage directly across the codebase, all configuration reads and writes now route through helper functions:
 - **`read_config<T>(env, key)`**:
   - Attempts to retrieve the key from `persistent()` storage first.
@@ -60,7 +60,7 @@ The 9 keys migrated are:
 
 We verified the migration logic, safety guards, and fallback paths by writing a robust set of tests.
 
-### A. Unit Tests Added ([test_config_migration.rs](file:///home/gamp/Documents/Collab-Works/drips/stellabill-contracts/contracts/subscription_vault/src/test_config_migration.rs))
+### A. Unit Tests Added ([test_config_migration.rs](file:///home/gamp/Documents/Collab-Works/drips/0b33/contracts/subscription_vault/src/test_config_migration.rs))
 - **`test_fresh_init_stores_in_persistent`**: Assures that new initialization writes config keys directly to persistent storage.
 - **`test_fallback_reads_on_v2`**: Confirms fallback config reads function correctly on old schema versions (v2).
 - **`test_migration_moves_all_keys`**: Validates that `migrate_config_to_persistent` promotes all 9 config keys, sets version to 3, emits `SchemaMigratedEvent`, and successfully removes instance entries.
@@ -69,7 +69,7 @@ We verified the migration logic, safety guards, and fallback paths by writing a 
 - **`test_rejection_of_schema_downgrades`**: Verifies that any downgrade attempt is blocked and throws `SchemaMigrationDowngrade`.
 
 ### B. Event Assertion Fixes
-- Standardized the order of operations in [test_operator.rs](file:///home/gamp/Documents/Collab-Works/drips/stellabill-contracts/contracts/subscription_vault/src/test_operator.rs): querying all ledger events *before* calling read-only methods (which clear the event queue in the Soroban test environment).
+- Standardized the order of operations in [test_operator.rs](file:///home/gamp/Documents/Collab-Works/drips/0b33/contracts/subscription_vault/src/test_operator.rs): querying all ledger events *before* calling read-only methods (which clear the event queue in the Soroban test environment).
 
 ### C. Verification Results
 All tests compile and pass successfully. 

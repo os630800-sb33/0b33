@@ -1,6 +1,6 @@
 # Resolve all merge conflict markers, choosing the upstream/main (second) side
 
-$files = Get-ChildItem -Path "C:\Users\ADMIN\Desktop\midea-drips\stellabill-contracts\contracts\subscription_vault\src" -Filter "*.rs" -Recurse
+$files = Get-ChildItem -Path "C:\Users\ADMIN\Desktop\midea-drips\0b33\contracts\subscription_vault\src" -Filter "*.rs" -Recurse
 
 foreach ($file in $files) {
     $text = (Get-Content -Path $file.FullName) -join "`n"
