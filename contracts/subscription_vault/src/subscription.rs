@@ -651,6 +651,8 @@ pub fn do_create_subscription_with_token(
         expires_at,
         grace_start_timestamp: None,
         cancel_at: None,
+        auto_renew: true,
+        auto_renew_disabled_at: None,
         expires_at_ledger,
         sub_account_label,
     };
@@ -3146,6 +3148,8 @@ pub fn do_create_subscription_from_plan(
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        auto_renew: true,
+        auto_renew_disabled_at: None,
         expires_at_ledger: None,
         sub_account_label,
     };
