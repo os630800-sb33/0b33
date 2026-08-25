@@ -28,6 +28,19 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run unit tests
         run: cargo test --all
+      - name: Verify committed test snapshots
+        run: |
+          snapshot_dir=contracts/subscription_vault/test_snapshots
+          if ! git diff --exit-code --no-ext-diff -- "$snapshot_dir"; then
+            echo "Snapshot contents differ from the committed baseline."
+            exit 1
+          fi
+          if ! diff -u \
+            <(git ls-files "$snapshot_dir" | sort) \
+            <(find "$snapshot_dir" -type f | sort); then
+            echo "Snapshot files differ from the committed baseline."
+            exit 1
+          fi
 
   performance-budgets:
     runs-on: ubuntu-latest
