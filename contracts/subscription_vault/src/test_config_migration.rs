@@ -27,6 +27,30 @@ fn test_fresh_init_stores_in_persistent() {
 }
 
 #[test]
+fn test_grace_period_is_admin_config_persisted() {
+    let te = TestEnv::default();
+
+    te.env.as_contract(&te.client.address, || {
+        let storage = te.env.storage();
+        assert!(storage.persistent().has(&DataKey::GracePeriod));
+        assert!(!storage.instance().has(&DataKey::GracePeriod));
+    });
+
+    te.env.mock_all_auths();
+    te.client.set_grace_period(&te.admin, &86_400u64);
+    assert_eq!(te.client.get_grace_period(), 86_400u64);
+
+    te.env.as_contract(&te.client.address, || {
+        let storage = te.env.storage();
+        assert_eq!(
+            storage.persistent().get::<_, u64>(&DataKey::GracePeriod),
+            Some(86_400u64)
+        );
+        assert!(!storage.instance().has(&DataKey::GracePeriod));
+    });
+}
+
+#[test]
 fn test_fallback_reads_on_v2() {
     let env = Env::default();
     let contract_id = env.register(crate::SubscriptionVault, ());

@@ -727,6 +727,16 @@ impl SubscriptionVault {
         admin::get_min_topup(&env)
     }
 
+    /// Update the grace-period duration. Admin only.
+    pub fn set_grace_period(env: Env, admin: Address, grace_period: u64) -> Result<(), Error> {
+        admin::do_set_grace_period(&env, admin, grace_period)
+    }
+
+    /// Get the current grace-period duration in seconds.
+    pub fn get_grace_period(env: Env) -> Result<u64, Error> {
+        admin::get_grace_period(&env)
+    }
+
     /// Get the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         admin::do_get_admin(&env)
