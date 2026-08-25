@@ -1619,28 +1619,24 @@ impl SubscriptionVault {
     pub fn deposit_funds(
         env: Env,
         subscription_id: u32,
-        subscriber: Address,
         amount: i128,
         idem_key: Option<soroban_sdk::BytesN<32>>,
     ) -> Result<(), Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "deposit_funds")?;
-        subscription::do_deposit_funds(
-            &env,
-            subscription_id,
-            subscriber.clone(),
-            amount,
-            idem_key,
-        )?;
         let sub = queries::get_subscription(&env, subscription_id)?;
+        let subscriber = sub.subscriber.clone();
+        let token = sub.token.clone();
+        subscription::do_deposit_funds(&env, subscription_id, amount, idem_key)?;
+        let updated = queries::get_subscription(&env, subscription_id)?;
         env.events().publish(
             (types::TOPIC_DEPOSITED, subscription_id),
             FundsDepositedEvent {
                 subscription_id,
                 subscriber,
-                token: sub.token,
+                token,
                 amount,
-                new_balance: sub.prepaid_balance,
+                new_balance: updated.prepaid_balance,
                 timestamp: env.ledger().timestamp(),
                 schema_version: crate::types::EVENT_SCHEMA_VERSION,
             },

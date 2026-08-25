@@ -110,7 +110,7 @@ fn new_funded_sub<'a>(
         &None,
         &None::<Address>,
     );
-    vault.deposit_funds(&sub_id, subscriber, &50_000i128, &None);
+    vault.deposit_funds(&sub_id, &50_000i128, &None);
     sub_id
 }
 
@@ -343,7 +343,7 @@ fn perf_list_by_subscriber_paginated() {
             &None,
             &None::<Address>,
         );
-        vault.deposit_funds(&sub_id, &subscriber, &50_000i128, &None);
+        vault.deposit_funds(&sub_id, &50_000i128, &None);
     }
 
     // First page.
