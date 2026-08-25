@@ -531,6 +531,11 @@ pub struct Subscription {
     /// Optional sub-account label for routing charges to an isolated merchant
     /// sub-account ledger (#575). `None` routes to the parent merchant balance.
     pub sub_account_label: Option<Symbol>,
+    /// When true, applies proration to the first billing period: the first charge
+    /// is scaled by (elapsed_seconds / interval_seconds) to reflect partial coverage.
+    /// When false (default), the first charge is always for the full amount regardless
+    /// of when in the interval the subscription starts.
+    pub proration_enabled: bool,
 }
 
 impl Subscription {

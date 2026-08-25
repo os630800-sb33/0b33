@@ -256,13 +256,22 @@ pub fn charge_one(
     // Discount is applied to the oracle-resolved gross amount. The fee split and
     // merchant credit then operate on `charge_amount` (the post-discount payable).
     // This preserves: Gross = Discount + Merchant Net + Treasury Fee.
-    let (charge_amount, _discount_amount) = crate::coupon::apply_discount_at_charge(
+    let (mut charge_amount, _discount_amount) = crate::coupon::apply_discount_at_charge(
         env,
         subscription_id,
         now,
         &sub.token,
         charge_amount,
     );
+
+    // ── Proration for partial first billing period ───────────────────────────
+    // If proration is enabled and this is the first charge (last_payment_timestamp == start_time),
+    // scale the charge by the elapsed time within the first interval.
+    if sub.proration_enabled && sub.last_payment_timestamp == sub.start_time {
+        let elapsed_seconds = now.saturating_sub(sub.start_time);
+        charge_amount = calculate_prorated_first_charge(charge_amount, sub.interval_seconds, elapsed_seconds)
+            .map_err(|e| charge_fail(env, subscription_id, e, charge_amount, now))?;
+    }
 
     if let Some(cap) = sub.lifetime_cap {
         if sub.lifetime_charged >= cap {
@@ -1389,4 +1398,84 @@ pub(crate) fn credit_charge_payees(
         )?;
     }
     Ok(())
+}
+
+/// Calculates the prorated charge amount for a partial first billing period.
+///
+/// # Arguments
+/// * `amount` - The full charge amount for one complete interval (must be non-negative)
+/// * `interval` - The complete billing interval in seconds (must be > 0)
+/// * `remaining_seconds` - Seconds remaining in the current partial interval (0..=u64::MAX)
+///
+/// # Returns
+/// * `Ok(prorated_amount)` - The charge amount scaled proportionally to elapsed time
+/// * `Err(Error::InvalidAmount)` - If amount is negative
+/// * `Err(Error::InvalidInput)` - If interval is 0
+///
+/// # Formula
+/// `prorated_amount = (amount * remaining_seconds) / interval`
+///
+/// # Invariants
+/// - `0 <= prorated_amount <= amount`
+/// - Monotonic: if `rem_low <= rem_high`, then `charge(rem_low) <= charge(rem_high)`
+/// - If `remaining_seconds >= interval`, returns `amount` (capped at full amount)
+/// - If `remaining_seconds == 0`, returns `0`
+pub fn calculate_prorated_first_charge(
+    amount: i128,
+    interval: u64,
+    remaining_seconds: u64,
+) -> Result<i128, Error> {
+    // Validate inputs
+    if amount < 0 {
+        return Err(Error::InvalidAmount);
+    }
+    
+    if interval == 0 {
+        return Err(Error::InvalidInput);
+    }
+    
+    // Handle edge case: if remaining_seconds is 0, no charge
+    if remaining_seconds == 0 {
+        return Ok(0);
+    }
+    
+    // Cap remaining_seconds to interval to avoid overflow
+    // If remaining >= interval, we charge the full amount
+    if remaining_seconds >= interval {
+        return Ok(amount);
+    }
+    
+    // Compute (amount * remaining_seconds) / interval safely
+    // Strategy: Check if we can do the multiplication in i128 first
+    // If not, use u128 for intermediate calculation
+    
+    // First try direct i128 multiplication to be efficient for small values
+    match amount.checked_mul(remaining_seconds as i128) {
+        Some(product) => {
+            // Multiplication succeeded, safe to divide
+            let prorated = product / interval as i128;
+            Ok(prorated.min(amount))
+        }
+        None => {
+            // Multiplication would overflow i128
+            // Use u128 for intermediate calculation
+            // amount is i128, convert to u128 (it's non-negative)
+            let amount_u128 = amount as u128;
+            let remaining_u128 = remaining_seconds as u128;
+            let interval_u128 = interval as u128;
+            
+            let product_u128 = amount_u128
+                .checked_mul(remaining_u128)
+                .ok_or(Error::InvalidAmount)?;
+            
+            let prorated_u128 = product_u128 / interval_u128;
+            
+            // Convert back to i128 (should not overflow since result <= amount < i128::MAX)
+            if prorated_u128 > i128::MAX as u128 {
+                Err(Error::InvalidAmount)
+            } else {
+                Ok((prorated_u128 as i128).min(amount))
+            }
+        }
+    }
 }
