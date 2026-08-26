@@ -1277,6 +1277,18 @@ pub struct BillingStatementsPage {
     pub total: u32,
 }
 
+/// Paginated result for subscription queries with cursor-based pagination.
+///
+/// Used by cursor-based endpoints like `get_subscriptions_by_merchant_paginated` to
+/// return a page of subscription records along with metadata for fetching the next page.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SubscriptionsMerchantPage {
+    pub subscriptions: Vec<Subscription>,
+    pub next_cursor: Option<u32>,
+    pub total: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BillingRetentionConfig {
@@ -1587,7 +1599,6 @@ pub struct OraclePrice {
     pub price: i128,
     pub timestamp: u64,
 }
-
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2759,7 +2770,6 @@ pub struct PrepaidQueryResult {
     pub next_start_id: Option<u32>,
     pub has_more: bool,
 }
-
 
 #[cfg(test)]
 mod event_topic_tests {
