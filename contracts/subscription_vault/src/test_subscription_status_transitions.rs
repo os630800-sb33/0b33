@@ -100,7 +100,7 @@ fn test_active_to_paused_to_active() {
     // Fund the subscription so the balance check in resume is satisfied.
     let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&subscriber, &PREPAID);
-    client.deposit_funds(&id, &subscriber, &PREPAID, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &PREPAID, &None::<soroban_sdk::BytesN<32>>);
 
     let initial_balance = client.get_subscription(&id).prepaid_balance;
 
@@ -131,7 +131,7 @@ fn test_active_to_cancelled() {
 
     let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&subscriber, &PREPAID);
-    client.deposit_funds(&id, &subscriber, &PREPAID, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &PREPAID, &None::<soroban_sdk::BytesN<32>>);
 
     let balance_before = client.get_subscription(&id).prepaid_balance;
     assert_eq!(client.get_subscription(&id).status, SubscriptionStatus::Active);
@@ -225,7 +225,7 @@ fn test_charge_paused_subscription_rejected() {
     // Fund the subscription so balance isn't the limiting factor.
     let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&subscriber, &PREPAID);
-    client.deposit_funds(&id, &subscriber, &PREPAID, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &PREPAID, &None::<soroban_sdk::BytesN<32>>);
 
     client.pause_subscription(&id, &subscriber);
     assert_eq!(client.get_subscription(&id).status, SubscriptionStatus::Paused);

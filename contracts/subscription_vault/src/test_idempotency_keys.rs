@@ -56,7 +56,7 @@ fn create_and_fund_sub(
     }
 
     let none_key: Option<BytesN<32>> = None;
-    client.deposit_funds(&id, subscriber, &DEPOSIT, &none_key);
+    client.deposit_funds(&id, &DEPOSIT, &none_key);
     env.ledger().set_timestamp(env.ledger().timestamp() + 1);
 
     id
@@ -131,12 +131,12 @@ fn test_deposit_funds_idempotent_replay() {
     let token_admin = token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&subscriber, &extra);
 
-    client.deposit_funds(&id, &subscriber, &extra, &Some(key.clone()));
+    client.deposit_funds(&id, &extra, &Some(key.clone()));
 
     let sub = client.get_subscription(&id);
     assert_eq!(sub.prepaid_balance, DEPOSIT + extra);
 
-    client.deposit_funds(&id, &subscriber, &extra, &Some(key.clone()));
+    client.deposit_funds(&id, &extra, &Some(key.clone()));
 
     let sub2 = client.get_subscription(&id);
     assert_eq!(sub2.prepaid_balance, DEPOSIT + extra);
@@ -154,8 +154,8 @@ fn test_deposit_funds_different_keys_allowed() {
     let token_admin = token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&subscriber, &20_000_000i128);
 
-    client.deposit_funds(&id, &subscriber, &10_000_000i128, &Some(key1));
-    client.deposit_funds(&id, &subscriber, &10_000_000i128, &Some(key2));
+    client.deposit_funds(&id, &10_000_000i128, &Some(key1));
+    client.deposit_funds(&id, &10_000_000i128, &Some(key2));
 
     let sub = client.get_subscription(&id);
     assert_eq!(sub.prepaid_balance, DEPOSIT + 20_000_000i128);
@@ -207,7 +207,7 @@ fn test_same_raw_key_different_entrypoints_no_collision() {
     let key = make_key(&env, 99);
 
     client.charge_one_off(&id, &merchant, &1_000_000i128, &Some(key.clone()));
-    client.deposit_funds(&id, &subscriber, &5_000_000i128, &Some(key.clone()));
+    client.deposit_funds(&id, &5_000_000i128, &Some(key.clone()));
 
     env.ledger().set_timestamp(env.ledger().timestamp() + INTERVAL);
     client.charge_subscription(&id, &Some(key.clone()));
@@ -226,7 +226,7 @@ fn test_ring_buffer_evicts_oldest_key() {
     for i in 0..33u8 {
         let key = make_key(&env, i);
         token_admin.mint(&subscriber, &MIN_TOPUP);
-        client.deposit_funds(&id, &subscriber, &MIN_TOPUP, &Some(key));
+        client.deposit_funds(&id, &MIN_TOPUP, &Some(key));
     }
 
     // Buffer now holds [32, 1, 2, 3, ..., 31], cursor = 1.
@@ -236,7 +236,7 @@ fn test_ring_buffer_evicts_oldest_key() {
 
     // Key 1 is still present → idempotent no-op (balance unchanged)
     let key1 = make_key(&env, 1);
-    client.deposit_funds(&id, &subscriber, &MIN_TOPUP, &Some(key1));
+    client.deposit_funds(&id, &MIN_TOPUP, &Some(key1));
     assert_eq!(
         client.get_subscription(&id).prepaid_balance,
         balance_before,
@@ -246,7 +246,7 @@ fn test_ring_buffer_evicts_oldest_key() {
     // Key 0 was evicted → fresh deposit (balance increases)
     let key0 = make_key(&env, 0);
     token_admin.mint(&subscriber, &MIN_TOPUP);
-    client.deposit_funds(&id, &subscriber, &MIN_TOPUP, &Some(key0));
+    client.deposit_funds(&id, &MIN_TOPUP, &Some(key0));
     assert_eq!(
         client.get_subscription(&id).prepaid_balance,
         balance_before + MIN_TOPUP,
@@ -289,7 +289,7 @@ fn test_idem_ring_wraparound_preserves_rejection_semantics() {
 
         token_admin.mint(&subscriber, &extra_per);
         let bal_before = client.get_subscription(&id).prepaid_balance;
-        let r = client.deposit_funds(&id, &subscriber, &extra_per, &Some(raw));
+        let r = client.deposit_funds(&id, &extra_per, &Some(raw));
         assert_eq!(r, ChargeExecutionResult::Charged);
 
         // Every insert while the hash is new must increase the balance.
@@ -305,7 +305,7 @@ fn test_idem_ring_wraparound_preserves_rejection_semantics() {
     let freshest_hash = seen_hashes.get(total_inserts - 1).unwrap();
     let freshest_raw = make_key(&env, (total_inserts - 1) as u8);
     let bal_before = client.get_subscription(&id).prepaid_balance;
-    client.deposit_funds(&id, &subscriber, &extra_per, &Some(freshest_raw));
+    client.deposit_funds(&id, &extra_per, &Some(freshest_raw));
     let bal_after = client.get_subscription(&id).prepaid_balance;
     assert_eq!(
         bal_before, bal_after,
@@ -333,7 +333,7 @@ fn test_idem_ring_wraparound_preserves_rejection_semantics() {
 
         let bal_before = client.get_subscription(&id).prepaid_balance;
         token_admin.mint(&subscriber, &extra_per);
-        client.deposit_funds(&id, &subscriber, &extra_per, &Some(raw));
+        client.deposit_funds(&id, &extra_per, &Some(raw));
         let bal_after = client.get_subscription(&id).prepaid_balance;
         assert_eq!(
             bal_after,
@@ -353,7 +353,7 @@ fn test_idem_ring_wraparound_preserves_rejection_semantics() {
         );
 
         let bal_before = client.get_subscription(&id).prepaid_balance;
-        client.deposit_funds(&id, &subscriber, &extra_per, &Some(raw));
+        client.deposit_funds(&id, &extra_per, &Some(raw));
         let bal_after = client.get_subscription(&id).prepaid_balance;
         assert_eq!(
             bal_before, bal_after,
@@ -365,7 +365,7 @@ fn test_idem_ring_wraparound_preserves_rejection_semantics() {
     let dup_idx = IDEM_HISTORY + 1;
     let dup_raw = make_key(&env, dup_idx as u8);
     let bal_before = client.get_subscription(&id).prepaid_balance;
-    client.deposit_funds(&id, &subscriber, &extra_per, &Some(dup_raw));
+    client.deposit_funds(&id, &extra_per, &Some(dup_raw));
     let bal_after = client.get_subscription(&id).prepaid_balance;
     assert_eq!(
         bal_before, bal_after,
@@ -393,7 +393,7 @@ fn test_idem_ring_exact_capacity_then_overwrite() {
     for i in 0..IDEM_HISTORY {
         let raw = make_key(&env, i as u8);
         token_admin.mint(&subscriber, &extra);
-        client.deposit_funds(&id, &subscriber, &extra, &Some(raw));
+        client.deposit_funds(&id, &extra, &Some(raw));
     }
 
     // All IDEM_HISTORY slots are occupied – re-inserting any of them
@@ -401,7 +401,7 @@ fn test_idem_ring_exact_capacity_then_overwrite() {
     let mid = IDEM_HISTORY / 2;
     let mid_raw = make_key(&env, mid as u8);
     let bal_before = client.get_subscription(&id).prepaid_balance;
-    client.deposit_funds(&id, &subscriber, &extra, &Some(mid_raw));
+    client.deposit_funds(&id, &extra, &Some(mid_raw));
     assert_eq!(
         client.get_subscription(&id).prepaid_balance,
         bal_before,
@@ -412,7 +412,7 @@ fn test_idem_ring_exact_capacity_then_overwrite() {
     let overwrite_raw = make_key(&env, 0xFF);
     token_admin.mint(&subscriber, &extra);
     let bal_before = client.get_subscription(&id).prepaid_balance;
-    client.deposit_funds(&id, &subscriber, &extra, &Some(overwrite_raw));
+    client.deposit_funds(&id, &extra, &Some(overwrite_raw));
     let bal_after = client.get_subscription(&id).prepaid_balance;
     assert_eq!(
         bal_after,
@@ -429,7 +429,7 @@ fn test_idem_ring_exact_capacity_then_overwrite() {
     );
     let bal_before = client.get_subscription(&id).prepaid_balance;
     token_admin.mint(&subscriber, &extra);
-    client.deposit_funds(&id, &subscriber, &extra, &Some(key0_raw));
+    client.deposit_funds(&id, &extra, &Some(key0_raw));
     assert_eq!(
         client.get_subscription(&id).prepaid_balance,
         bal_before + extra,

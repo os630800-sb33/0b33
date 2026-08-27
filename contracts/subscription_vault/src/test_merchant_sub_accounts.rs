@@ -321,7 +321,7 @@ fn create_subscription_with_sub_account_label() {
         )
         .unwrap();
 
-    client.deposit_funds(&sub_id, &subscriber, &5000, &None);
+    client.deposit_funds(&sub_id, &5000, &None);
     client.charge_subscription(&sub_id, &None);
 
     // Sub-account has the merchant's net charge amount (1000 with 0 fee bps).
@@ -354,7 +354,7 @@ fn create_subscription_without_sub_account_label_leaves_parent_balance() {
         )
         .unwrap();
 
-    client.deposit_funds(&sub_id, &subscriber, &5000, &None);
+    client.deposit_funds(&sub_id, &5000, &None);
     client.charge_subscription(&sub_id, &None);
 
     // No sub-account label → funds stay in parent merchant balance.
@@ -389,7 +389,7 @@ fn one_off_charge_routes_to_sub_account() {
         )
         .unwrap();
 
-    client.deposit_funds(&sub_id, &subscriber, &5000, &None);
+    client.deposit_funds(&sub_id, &5000, &None);
 
     // One-off charge of 2000
     client.charge_one_off(&sub_id, &merchant, &2000, &None);
@@ -427,7 +427,7 @@ fn charge_to_unregistered_sub_account_fails() {
         )
         .unwrap();
 
-    client.deposit_funds(&sub_id, &subscriber, &5000, &None);
+    client.deposit_funds(&sub_id, &5000, &None);
 
     // The charge engine calls credit_sub_account which checks that the
     // sub-account exists — it should fail because "sales" was never registered.
@@ -463,7 +463,7 @@ fn charge_subscription_to_sub_account_updates_earnings() {
         )
         .unwrap();
 
-    client.deposit_funds(&sub_id, &subscriber, &5000, &None);
+    client.deposit_funds(&sub_id, &5000, &None);
     client.charge_subscription(&sub_id, &None);
 
     // Earnings (parent-level) must reflect the charge even though the

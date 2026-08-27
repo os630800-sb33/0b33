@@ -175,7 +175,7 @@ fn test_state_consistency() {
     let sub_id = client.create_subscription(&subscriber, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
     
-    client.deposit_funds(&sub_id, &subscriber, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
     
     // Total accounted should be 50M. Contract balance is 50M.
     // Try to recover 1 from accounted funds - should fail
@@ -264,7 +264,7 @@ fn test_get_token_reconciliation_with_prepaid() {
     let sub_id =
         client.create_subscription(&subscriber, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
-    client.deposit_funds(&sub_id, &subscriber, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // Get reconciliation
     let reconciliation = client.get_token_reconciliation(&token_addr);
@@ -297,7 +297,7 @@ fn test_get_token_reconciliation_after_charge() {
     let sub_id =
         client.create_subscription(&subscriber, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
-    client.deposit_funds(&sub_id, &subscriber, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // Charge the subscription
     env.ledger().with_mut(|l| l.timestamp = INTERVAL + 1001);
@@ -332,7 +332,7 @@ fn test_get_token_reconciliation_with_recoverable() {
     let sub_id =
         client.create_subscription(&subscriber, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
-    client.deposit_funds(&sub_id, &subscriber, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // Mint directly to contract (stranded funds)
     token_client.mint(&client.address, &25_000_000);
@@ -404,7 +404,7 @@ fn test_generate_reconciliation_proof() {
     let sub_id =
         client.create_subscription(&subscriber, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
-    client.deposit_funds(&sub_id, &subscriber, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // Mint stranded funds
     token_client.mint(&client.address, &10_000_000);
@@ -457,8 +457,8 @@ fn test_query_prepaid_balances_paginated() {
         client.create_subscription(&subscriber2, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
 
-    client.deposit_funds(&sub1, &subscriber1, &30_000_000i128, &None::<soroban_sdk::BytesN<32>>);
-    client.deposit_funds(&sub2, &subscriber2, &20_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub1, &30_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub2, &20_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // Query first page
     let request = PrepaidQueryRequest {
@@ -519,7 +519,7 @@ fn test_query_prepaid_balances_paginated_wrong_token() {
     let sub_id =
         client.create_subscription(&subscriber, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
-    client.deposit_funds(&sub_id, &subscriber, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // Query with a different token
     let token2 = env
@@ -579,8 +579,8 @@ fn test_full_reconciliation_workflow() {
         client.create_subscription(&subscriber2, &merchant, &10_000_000, &INTERVAL, &false, &None, &None::<u64>&None::<u32>,
 );
 
-    client.deposit_funds(&sub1, &subscriber1, &100_000_000i128, &None::<soroban_sdk::BytesN<32>>);
-    client.deposit_funds(&sub2, &subscriber2, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub1, &100_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&sub2, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
 
     // 2. Add stranded funds
     token_client.mint(&client.address, &25_000_000);

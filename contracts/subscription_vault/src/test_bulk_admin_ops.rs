@@ -25,8 +25,7 @@ fn funded_sub(te: &TestEnv, subscriber: &Address, merchant: &Address) -> u32 {
         &None::<u32>,
 );
     te.stellar_token_client().mint(subscriber, &DEPOSIT);
-    te.client
-        .deposit_funds(&sub_id, subscriber, &DEPOSIT, &None);
+    te.client.deposit_funds(&sub_id, &DEPOSIT, &None);
     sub_id
 }
 
@@ -258,8 +257,7 @@ fn bulk_pause_reports_expired_as_failure() {
         &None::<u32>,
 );
     te.stellar_token_client().mint(&subscriber, &DEPOSIT);
-    te.client
-        .deposit_funds(&sub_id, &subscriber, &DEPOSIT, &None);
+    te.client.deposit_funds(&sub_id, &DEPOSIT, &None);
 
     te.jump(2_000); // past expires_at
 

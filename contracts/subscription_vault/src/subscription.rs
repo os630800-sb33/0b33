@@ -764,10 +764,11 @@ pub fn do_create_subscription_with_token(
 pub fn do_deposit_funds(
     env: &Env,
     subscription_id: u32,
-    subscriber: Address,
     amount: i128,
     idem_key: Option<soroban_sdk::BytesN<32>>,
 ) -> Result<(), Error> {
+    let mut sub = get_subscription(env, subscription_id)?;
+    let subscriber = sub.subscriber.clone();
     subscriber.require_auth();
     crate::blocklist::require_not_blocklisted(env, &subscriber)?;
 
@@ -778,11 +779,6 @@ pub fn do_deposit_funds(
     }
     if amount < min_topup {
         return Err(Error::BelowMinimumTopup);
-    }
-
-    let mut sub = get_subscription(env, subscription_id)?;
-    if subscriber != sub.subscriber {
-        return Err(Error::Unauthorized);
     }
 
     crate::blocklist::require_not_blocklisted(env, &sub.merchant)?;
