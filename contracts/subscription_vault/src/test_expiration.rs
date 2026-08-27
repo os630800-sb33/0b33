@@ -1231,6 +1231,8 @@ fn test_is_expired_dual_bound_invariant() {
             grace_start_timestamp: None,
             cancel_at: None,
             expires_at_ledger,
+            sub_account_label: None,
+            proration_enabled: false,
         }
     }
 
@@ -1347,6 +1349,8 @@ fn test_is_expired_dual_bound_invariant_randomized() {
             grace_start_timestamp: None,
             cancel_at: None,
             expires_at_ledger,
+            sub_account_label: None,
+            proration_enabled: false,
         }
     }
 

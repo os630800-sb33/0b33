@@ -1351,6 +1351,8 @@ impl SubscriptionVault {
                     grace_start_timestamp: None,
                     cancel_at: None,
                     expires_at_ledger: s.expires_at_ledger,
+                    sub_account_label: None,
+                    proration_enabled: false,
                 };
                 env.storage()
                     .persistent()
@@ -1408,6 +1410,7 @@ impl SubscriptionVault {
         expires_at: Option<u64>,
         expires_at_ledger: Option<u32>,
         sub_account_label: Option<Symbol>,
+        proration_enabled: bool,
     ) -> Result<u32, Error> {
         require_not_emergency_stop(&env)?;
         let sub_id = subscription::do_create_subscription(
@@ -1421,6 +1424,7 @@ impl SubscriptionVault {
             expires_at,
             expires_at_ledger,
             sub_account_label,
+            proration_enabled,
         )?;
         let token: Address = admin::read_config(&env, &DataKey::Token).ok_or(Error::NotFound)?;
         env.events().publish(
@@ -1453,6 +1457,7 @@ impl SubscriptionVault {
         lifetime_cap: Option<i128>,
         expires_at: Option<u64>,
         entries: Vec<(Address, u32)>,
+        proration_enabled: bool,
     ) -> Result<u32, Error> {
         require_not_emergency_stop(&env)?;
 
@@ -1481,6 +1486,9 @@ impl SubscriptionVault {
             usage_enabled,
             lifetime_cap,
             expires_at,
+            None,
+            None,
+            proration_enabled,
         )?;
 
         let split = SplitPayees {
@@ -1581,6 +1589,7 @@ impl SubscriptionVault {
         expires_at: Option<u64>,
         expires_at_ledger: Option<u32>,
         sub_account_label: Option<Symbol>,
+        proration_enabled: bool,
     ) -> Result<u32, Error> {
         require_not_emergency_stop(&env)?;
         let sub_id = subscription::do_create_subscription_with_token(
@@ -1595,6 +1604,7 @@ impl SubscriptionVault {
             expires_at,
             expires_at_ledger,
             sub_account_label,
+            proration_enabled,
         )?;
         env.events().publish(
             (types::TOPIC_CREATED, sub_id),

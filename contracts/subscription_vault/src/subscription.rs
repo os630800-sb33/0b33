@@ -516,6 +516,7 @@ pub fn do_create_subscription(
     expires_at: Option<u64>,
     expires_at_ledger: Option<u32>,
     sub_account_label: Option<Symbol>,
+    proration_enabled: bool,
 ) -> Result<u32, Error> {
     let token = crate::admin::get_token(env)?;
 
@@ -534,6 +535,7 @@ pub fn do_create_subscription(
         expires_at,
         expires_at_ledger,
         sub_account_label,
+        proration_enabled,
     )
 }
 
@@ -550,6 +552,7 @@ pub fn do_create_subscription_with_token(
     expires_at: Option<u64>,
     expires_at_ledger: Option<u32>,
     sub_account_label: Option<Symbol>,
+    proration_enabled: bool,
 ) -> Result<u32, Error> {
     subscriber.require_auth();
 
@@ -653,6 +656,7 @@ pub fn do_create_subscription_with_token(
         cancel_at: None,
         expires_at_ledger,
         sub_account_label,
+        proration_enabled,
     };
 
     // Allocate ID with overflow / limit guard.
@@ -3148,6 +3152,7 @@ pub fn do_create_subscription_from_plan(
         cancel_at: None,
         expires_at_ledger: None,
         sub_account_label,
+        proration_enabled: false,
     };
 
     write_subscription(env, id, &sub);

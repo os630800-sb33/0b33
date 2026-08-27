@@ -1053,6 +1053,8 @@ fn test_subscription_struct_status_field() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     assert_eq!(sub.status, SubscriptionStatus::Active);
     assert_eq!(sub.lifetime_cap, None);
@@ -1079,6 +1081,8 @@ fn test_subscription_struct_with_lifetime_cap() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     assert_eq!(sub.lifetime_cap, Some(cap));
     assert_eq!(sub.lifetime_charged, 0);
@@ -2383,6 +2387,8 @@ fn test_compute_next_charge_info_active() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     let info = compute_next_charge_info(&env, &sub);
     assert_eq!(info.next_charge_timestamp, T0 + INTERVAL);
@@ -2408,6 +2414,8 @@ fn test_compute_next_charge_info_paused() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     let info = compute_next_charge_info(&env, &sub);
     assert!(!info.is_charge_expected);
@@ -2433,6 +2441,8 @@ fn test_compute_next_charge_info_cancelled() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     let info = compute_next_charge_info(&env, &sub);
     assert!(!info.is_charge_expected);
@@ -2457,6 +2467,8 @@ fn test_compute_next_charge_info_insufficient_balance() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     let info = compute_next_charge_info(&env, &sub);
     assert!(!info.is_charge_expected);
@@ -2590,6 +2602,8 @@ fn test_compute_next_charge_info_overflow_protection() {
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
+        sub_account_label: None,
+        proration_enabled: false,
     };
     let info = compute_next_charge_info(&env, &sub);
     assert!(info.is_charge_expected);
