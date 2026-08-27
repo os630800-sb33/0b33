@@ -85,6 +85,21 @@ fn test_cancel_by_merchant() {
 }
 
 #[test]
+fn test_cancel_by_merchant_from_paused_subscription() {
+    let (_env, client, sub_id, subscriber, merchant, _stranger) = setup();
+
+    client.pause_subscription(&sub_id, &subscriber);
+    let paused = client.get_subscription(&sub_id);
+    assert_eq!(paused.status, SubscriptionStatus::Paused);
+
+    client.cancel_subscription(&sub_id, &merchant);
+
+    let sub = client.get_subscription(&sub_id);
+    assert_eq!(sub.status, SubscriptionStatus::Cancelled);
+    assert_eq!(sub.prepaid_balance, 0);
+}
+
+#[test]
 fn test_cancel_by_stranger_rejected() {
     let (_env, client, sub_id, _subscriber, _merchant, stranger) = setup();
 
