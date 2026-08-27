@@ -4164,6 +4164,95 @@ fn test_get_subscriptions_by_merchant_pagination_and_invalid_limit() {
 }
 
 #[test]
+fn test_get_subscriptions_by_merchant_paginated_cursor_based() {
+    let test_env = TestEnv::default();
+    let subscriber = Address::generate(&test_env.env);
+    let merchant = Address::generate(&test_env.env);
+    
+    // Create 5 subscriptions for the merchant
+    for _ in 0..5 {
+        test_env.client.create_subscription(
+            &subscriber,
+            &merchant,
+            &AMOUNT,
+            &INTERVAL,
+            &false,
+            &None::<i128>,
+            &None::<u64>,
+            &None::<u32>,
+        );
+    }
+    
+    // Test invalid limit (0)
+    assert_eq!(
+        test_env
+            .client
+            .try_get_subscriptions_by_merchant_paginated(&merchant, &None::<u32>, &0u32),
+        Err(Ok(Error::InvalidInput))
+    );
+    
+    // Test invalid limit (too high)
+    assert_eq!(
+        test_env
+            .client
+            .try_get_subscriptions_by_merchant_paginated(
+                &merchant,
+                &None::<u32>,
+                &(MAX_SUBSCRIPTION_LIST_PAGE + 1)
+            ),
+        Err(Ok(Error::InvalidInput))
+    );
+    
+    // Test first page with limit 2
+    let page1 = test_env
+        .client
+        .get_subscriptions_by_merchant_paginated(&merchant, &None::<u32>, &2u32);
+    assert_eq!(page1.subscriptions.len(), 2);
+    assert_eq!(page1.total, 5);
+    assert_eq!(page1.next_cursor, Some(2u32));
+    
+    // Test second page using cursor from first page
+    let page2 = test_env
+        .client
+        .get_subscriptions_by_merchant_paginated(&merchant, &page1.next_cursor, &2u32);
+    assert_eq!(page2.subscriptions.len(), 2);
+    assert_eq!(page2.total, 5);
+    assert_eq!(page2.next_cursor, Some(4u32));
+    
+    // Test final page
+    let page3 = test_env
+        .client
+        .get_subscriptions_by_merchant_paginated(&merchant, &page2.next_cursor, &2u32);
+    assert_eq!(page3.subscriptions.len(), 1);
+    assert_eq!(page3.total, 5);
+    assert_eq!(page3.next_cursor, None);
+    
+    // Test cursor beyond the list
+    let page_empty = test_env
+        .client
+        .get_subscriptions_by_merchant_paginated(&merchant, &Some(5u32), &2u32);
+    assert_eq!(page_empty.subscriptions.len(), 0);
+    assert_eq!(page_empty.total, 5);
+    assert_eq!(page_empty.next_cursor, None);
+    
+    // Test cursor at exact boundary
+    let page_exact = test_env
+        .client
+        .get_subscriptions_by_merchant_paginated(&merchant, &Some(4u32), &2u32);
+    assert_eq!(page_exact.subscriptions.len(), 1);
+    assert_eq!(page_exact.total, 5);
+    assert_eq!(page_exact.next_cursor, None);
+    
+    // Test large limit (returns all)
+    let page_all = test_env
+        .client
+        .get_subscriptions_by_merchant_paginated(&merchant, &None::<u32>, &100u32);
+    assert_eq!(page_all.subscriptions.len(), 5);
+    assert_eq!(page_all.total, 5);
+    assert_eq!(page_all.next_cursor, None);
+}
+
+#[test]
 fn test_get_subscriptions_by_token_pagination_and_count() {
     let test_env = TestEnv::default();
     let subscriber = Address::generate(&test_env.env);
