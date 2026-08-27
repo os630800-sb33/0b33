@@ -1271,6 +1271,7 @@ pub struct BillingStatement {
     pub period_end: u64,
     pub amount: i128,
     pub merchant: Address,
+    pub token: Address,
     pub kind: BillingChargeKind,
 }
 
