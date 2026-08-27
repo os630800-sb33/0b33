@@ -627,10 +627,12 @@ pub fn do_create_subscription_with_token(
     let resolved_cap = resolve_cap(env, &merchant, lifetime_cap);
 
     if let Some(cap) = resolved_cap {
-        if cap <= 0 {
+        let cap_i128: i128 = cap as i128;
+        let amount_i128: i128 = amount as i128;
+        if cap_i128 <= 0 {
             return Err(Error::InvalidAmount);
         }
-        if cap < amount {
+        if cap_i128 < amount_i128 {
             return Err(Error::InvalidInput);
         }
     }
@@ -2119,7 +2121,7 @@ pub fn do_charge_one_off(
         return Err(Error::Unauthorized);
     }
     if let Some(cap) = sub.lifetime_cap {
-        if sub.lifetime_charged >= cap {
+        if crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged) {
             if sub.status != SubscriptionStatus::Cancelled {
                 transition_to(&mut sub.status, SubscriptionStatus::Cancelled)?;
                 write_subscription(env, subscription_id, &sub);
@@ -2169,7 +2171,7 @@ pub fn do_charge_one_off(
     sub.lifetime_charged = new_charged;
     let cap_reached = sub
         .lifetime_cap
-        .map(|cap| sub.lifetime_charged >= cap)
+        .map(|cap| crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged))
         .unwrap_or(false);
 
     sub.prepaid_balance = safe_sub(sub.prepaid_balance, amount)?;
@@ -2847,10 +2849,22 @@ fn resolve_cap(env: &Env, merchant: &Address, explicit_cap: Option<i128>) -> Opt
     get_global_cap_default(env)
 }
 
+fn lifetime_cap_reached(cap: i128, lifetime_charged: i128) -> bool {
+    let cap_i128: i128 = cap as i128;
+    let charged_i128: i128 = lifetime_charged as i128;
+    charged_i128 >= cap_i128
+}
+
+fn lifetime_cap_remaining(cap: i128, lifetime_charged: i128) -> i128 {
+    let cap_i128: i128 = cap as i128;
+    let charged_i128: i128 = lifetime_charged as i128;
+    cap_i128.saturating_sub(charged_i128).max(0)
+}
+
 /// Reject a deposit that would lock funds beyond the remaining chargeable cap.
 fn enforce_deposit_cap(sub: &Subscription, deposit: i128) -> Result<(), Error> {
     if let Some(cap) = sub.lifetime_cap {
-        let chargeable_remaining = cap.saturating_sub(sub.lifetime_charged);
+        let chargeable_remaining = lifetime_cap_remaining(cap, sub.lifetime_charged);
         let depositable_remaining = chargeable_remaining.saturating_sub(sub.prepaid_balance);
         if deposit > depositable_remaining {
             return Err(Error::LifetimeCapReached);
@@ -3354,7 +3368,9 @@ pub fn do_migrate_subscription_to_plan(
 
     // Enforce compatibility of lifetime caps: cannot migrate into a cap that is already exceeded.
     if let Some(cap) = new_plan.lifetime_cap {
-        if sub.lifetime_charged > cap {
+        let cap_i128: i128 = cap as i128;
+        let charged_i128: i128 = sub.lifetime_charged as i128;
+        if charged_i128 > cap_i128 {
             return Err(Error::LifetimeCapReached);
         }
         sub.lifetime_cap = Some(cap);
