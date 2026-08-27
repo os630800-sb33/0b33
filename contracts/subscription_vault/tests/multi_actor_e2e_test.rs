@@ -80,7 +80,7 @@ fn test_multi_actor_e2e_flow() {
 
     // Step 2: `deposit` funds
     let deposit_amount = 15_000_000; // Covers 3 intervals
-    vault.deposit_funds(&sub_id, &subscriber, &deposit_amount, &None);
+    vault.deposit_funds(&sub_id, &deposit_amount, &None);
 
     assert_eq!(token.balance(&subscriber), initial_mint - deposit_amount);
     assert_eq!(token.balance(&vault_id), deposit_amount);

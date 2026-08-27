@@ -91,6 +91,7 @@
 //! | Entrypoint | Delegate |
 //! |---|---|
 //! | `get_subscriptions_by_merchant` | [`crate::queries::get_subscriptions_by_merchant`] |
+//! | `get_subscriptions_by_merchant_paginated` | [`crate::queries::get_subscriptions_by_merchant_paginated`] |
 //! | `get_merchant_subscription_count` | [`crate::queries::get_merchant_subscription_count`] |
 //! | `get_merchant_max_subs` | [`crate::queries::get_merchant_max_subs`] |
 //! | `set_merchant_max_subs` | [`crate::subscription::do_set_merchant_max_subs`] |
@@ -113,7 +114,8 @@ pub use crate::merchant::{
 };
 pub use crate::queries::{
     generate_reconciliation_proof, get_contract_reconciliation_summary, get_merchant_max_subs,
-    get_merchant_subscription_count, get_subscriptions_by_merchant, get_token_reconciliation,
+    get_merchant_subscription_count, get_subscriptions_by_merchant,
+    get_subscriptions_by_merchant_paginated, get_token_reconciliation,
     query_prepaid_balances_paginated,
 };
 pub use crate::subscription::do_set_merchant_max_subs;
