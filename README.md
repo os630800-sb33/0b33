@@ -2,6 +2,8 @@
 
 Soroban smart contracts for **Stellabill** — prepaid USDC subscription billing on the Stellar network. This repository contains the on-chain logic for recurring payments, subscriber vaults, and merchant payouts.
 
+For a runnable off-chain example, see the [reference event indexer](docs/indexer_reference.md), which captures Soroban contract events in a local SQLite database.
+
 ---
 
 ## Table of contents
@@ -154,7 +156,6 @@ The installer is **idempotent** — safe to run repeatedly. It:
 1. Sets the executable bit on all scripts under `.githooks/`.
 2. Runs `git config core.hooksPath .githooks` (no global config changes).
 3. Smoke-tests the hook to confirm it exits 0.
-
 After installation, every `git commit` automatically runs:
 
 | Check | Command | Scope |
