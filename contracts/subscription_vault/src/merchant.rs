@@ -1589,6 +1589,7 @@ pub fn do_register_plan(
         amount,
         interval_seconds,
         trial_seconds,
+        trial_period_seconds: (trial_seconds > 0).then_some(trial_seconds),
         usage_enabled,
         lifetime_cap,
         template_key: plan_id,

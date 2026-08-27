@@ -1222,14 +1222,24 @@ pub struct PlanTemplate {
     pub token: Address,
     pub amount: i128,
     pub interval_seconds: u64,
-    /// Optional free-trial period in seconds. During this window the subscriber
-    /// is not charged for the first billing interval. `0` means no trial.
+    /// Legacy trial duration in seconds. `0` means no trial.
     pub trial_seconds: u64,
+    /// Optional free-trial period in seconds. When set, the first charge is
+    /// deferred by this duration. `None` means no trial.
+    pub trial_period_seconds: Option<u64>,
     pub usage_enabled: bool,
     pub lifetime_cap: Option<i128>,
     pub template_key: u32,
     pub version: u32,
     pub is_disabled: bool,
+}
+
+impl PlanTemplate {
+    pub fn effective_trial_period_seconds(&self) -> u64 {
+        self.trial_period_seconds
+            .or((self.trial_seconds > 0).then_some(self.trial_seconds))
+            .unwrap_or(0)
+    }
 }
 
 #[contracttype]

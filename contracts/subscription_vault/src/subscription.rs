@@ -3146,19 +3146,21 @@ pub fn do_create_subscription_from_plan(
     crate::admin::write_config(env, &DataKey::NextId, &next_id);
 
     let resolved_cap = resolve_cap(env, &plan.merchant, plan.lifetime_cap);
+    let now = env.ledger().timestamp();
+    let trial_delay = plan.effective_trial_period_seconds();
     let sub = Subscription {
         subscriber: subscriber.clone(),
         merchant: plan.merchant.clone(),
         token: plan.token.clone(),
         amount: plan.amount,
         interval_seconds: plan.interval_seconds,
-        last_payment_timestamp: env.ledger().timestamp(),
+        last_payment_timestamp: now.saturating_add(trial_delay),
         status: SubscriptionStatus::Active,
         prepaid_balance: 0i128,
         usage_enabled: plan.usage_enabled,
         lifetime_cap: resolved_cap,
         lifetime_charged: 0i128,
-        start_time: env.ledger().timestamp(),
+        start_time: now,
         expires_at: None,
         grace_start_timestamp: None,
         cancel_at: None,
@@ -3251,12 +3253,16 @@ pub fn do_update_plan_template(
 
     let new_plan_id = next_plan_id(env);
     let new_version = existing.version.checked_add(1).ok_or(Error::Overflow)?;
+    let trial_period_seconds = existing
+        .trial_period_seconds
+        .or((existing.trial_seconds > 0).then_some(existing.trial_seconds));
     let updated = PlanTemplate {
         merchant: merchant.clone(),
         token,
         amount,
         interval_seconds,
         trial_seconds: existing.trial_seconds,
+        trial_period_seconds,
         usage_enabled,
         lifetime_cap,
         template_key: existing.template_key,
