@@ -10,6 +10,18 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  error-table-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@v5.0.0
+        with:
+          python-version: '3.12'
+      - name: Validate error table generation
+        run: python scripts/generate_error_table.py --check
+        working-directory: ${{ github.workspace }}
+
   unit-tests:
     runs-on: ubuntu-latest
     steps:
