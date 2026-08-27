@@ -212,6 +212,23 @@ The script creates three test identities (`admin`, `subscriber`, `merchant`),
 wraps the native Stellar asset as a test token, and validates the deployment
 by creating, funding, and charging a subscription.
 
+### Error table generation
+
+[`scripts/generate_error_table.py`](scripts/generate_error_table.py) is a code-generation utility that produces the canonical error-code cross-reference table by:
+
+1. Parsing `contracts/subscription_vault/src/types.rs` to extract error variants and numeric codes.
+2. Grepping all `.rs` source files to identify which contract entrypoints emit each error.
+3. Splicing the generated table into the "## Entrypoint Cross-Reference" section of [`docs/errors.md`](docs/errors.md).
+
+**Usage:**
+
+```bash
+python scripts/generate_error_table.py       # Generate and update docs/errors.md in-place
+python scripts/generate_error_table.py --check # Check mode: fail if docs/errors.md would change (used by CI)
+```
+
+The generator is deterministic; when run without changes to the error enum or emitting code, it produces no output diff. The generated table is committed to the repository as the single source of truth for error codes and recommended client retry handling.
+
 ---
 
 ## Contributing (open source)
