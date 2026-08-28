@@ -250,6 +250,86 @@ pub fn require_admin_or_operator_auth(env: &Env, caller: &Address) -> Result<(),
     Err(Error::Unauthorized)
 }
 
+// ── Multi-Sig Enforcement ────────────────────────────────────────────────────
+
+/// Enforce multi-sig approval for critical admin operations.
+/// 
+/// This function checks that a valid governance proposal exists with sufficient
+/// quorum for the specified operation. Critical operations that touch funds or
+/// halt the contract require multi-sig guardian approval before execution.
+pub fn require_multisig_approval(
+    env: &Env,
+    kind: crate::types::ProposalKind,
+    target: &Address,
+    target2: Option<&Address>,
+    target3: u32,
+) -> Result<u64, Error> {
+    // Check if we have any guardians configured
+    let guardians = crate::governance::list_guardians(env);
+    if guardians.is_empty() {
+        // If no guardians are configured, fall back to single admin for backward compatibility
+        // This maintains the existing behavior until guardians are setup
+        return Ok(0);
+    }
+
+    // Look for a valid proposal that matches this operation
+    let current_proposal_id = crate::governance::get_current_proposal_id(env);
+    
+    // Search recent proposals to find a matching one
+    for i in 0..10 {  // Check last 10 proposals
+        if current_proposal_id < i {
+            break;
+        }
+        let proposal_id = current_proposal_id - i;
+        
+        if let Some(proposal) = crate::governance::get_proposal(env, proposal_id) {
+            // Check if this proposal matches our operation
+            if proposal.kind == kind 
+                && proposal.target == *target
+                && proposal.target2.as_ref() == target2
+                && proposal.target3 == target3
+                && !proposal.executed
+            {
+                // Check if proposal has passed its ETA (timelock)
+                let now = env.ledger().timestamp();
+                if now < proposal.eta {
+                    return Err(Error::MultiSigProposalExpired);
+                }
+                
+                // Check if quorum is reached
+                let (yes_weight, total_weight) = crate::governance::calculate_quorum(env, &proposal);
+                let quorum_needed = (total_weight as u64 * proposal.quorum_bps as u64) / 10_000;
+                
+                if yes_weight as u64 >= quorum_needed {
+                    return Ok(proposal_id);
+                } else {
+                    return Err(Error::MultiSigQuorumNotReached);
+                }
+            }
+        }
+    }
+    
+    Err(Error::MultiSigProposalNotFound)
+}
+
+/// Mark a multi-sig proposal as executed to prevent replay.
+pub fn consume_multisig_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
+    if proposal_id == 0 {
+        // No proposal to consume (single admin mode)
+        return Ok(());
+    }
+    
+    // Mark proposal as executed - this is handled by the governance module
+    crate::governance::do_execute_proposal(env, proposal_id)
+}
+
+/// Check if multi-sig enforcement is enabled (i.e., guardians are configured).
+pub fn is_multisig_enabled(env: &Env) -> bool {
+    !crate::governance::list_guardians(env).is_empty()
+}
+
+// ── Configuration Functions ───────────────────────────────────────────────────
+
 pub fn do_set_min_topup(env: &Env, admin: Address, min_topup: i128) -> Result<(), Error> {
     require_admin_auth(env, &admin)?;
     if min_topup <= 0 {
@@ -318,6 +398,15 @@ pub fn add_accepted_token(
 ) -> Result<(), Error> {
     require_admin_auth(env, &admin)?;
 
+    // Require multi-sig approval for adding tokens
+    let proposal_id = require_multisig_approval(
+        env,
+        crate::types::ProposalKind::AddAcceptedToken,
+        &token,
+        None,
+        decimals,
+    )?;
+
     let storage = env.storage().instance();
     if !storage.has(&accepted_token_decimals_key(&token)) {
         enforce_config_cooldown(env, "AcceptedTokens")?;
@@ -326,6 +415,10 @@ pub fn add_accepted_token(
         storage.set(&accepted_tokens_key(), &tokens);
     }
     storage.set(&accepted_token_decimals_key(&token), &decimals);
+    
+    // Mark the multi-sig proposal as consumed
+    consume_multisig_proposal(env, proposal_id)?;
+    
     Ok(())
 }
 
@@ -336,6 +429,15 @@ pub fn remove_accepted_token(env: &Env, admin: Address, token: Address) -> Resul
     if token == default_token {
         return Err(Error::InvalidInput);
     }
+
+    // Require multi-sig approval for removing tokens
+    let proposal_id = require_multisig_approval(
+        env,
+        crate::types::ProposalKind::RemoveAcceptedToken,
+        &token,
+        None,
+        0, // no additional parameter needed for removal
+    )?;
 
     enforce_config_cooldown(env, "AcceptedTokens")?;
 
@@ -350,6 +452,10 @@ pub fn remove_accepted_token(env: &Env, admin: Address, token: Address) -> Resul
         }
     }
     storage.set(&accepted_tokens_key(), &next);
+    
+    // Mark the multi-sig proposal as consumed
+    consume_multisig_proposal(env, proposal_id)?;
+    
     Ok(())
 }
 
@@ -526,11 +632,23 @@ pub fn do_rotate_admin(
         return Err(Error::InvalidNewAdmin);
     }
 
+    // Require multi-sig approval for admin rotation
+    let proposal_id = require_multisig_approval(
+        env,
+        crate::types::ProposalKind::RotateAdmin,
+        &new_admin,
+        None,
+        0, // no additional target3 parameter needed
+    )?;
+
     enforce_config_cooldown(env, "Admin")?;
 
     // Atomic swap: write new admin before emitting the event so any indexer
     // that reads state on the event sees the already-updated value.
     write_config(env, &DataKey::Admin, &new_admin);
+
+    // Mark the multi-sig proposal as consumed
+    consume_multisig_proposal(env, proposal_id)?;
 
     env.events().publish(
         (Symbol::new(env, "admin_rotated"),),
@@ -560,6 +678,23 @@ pub fn do_recover_stranded_funds(
         return Err(Error::InvalidRecoveryAmount);
     }
 
+    // Require multi-sig approval for fund recovery
+    // We use the amount truncated to u32 as a reasonable approximation
+    // for the proposal matching. For large amounts, consider splitting.
+    let amount_u32 = if amount > u32::MAX as i128 {
+        u32::MAX
+    } else {
+        amount as u32
+    };
+    
+    let proposal_id = require_multisig_approval(
+        env,
+        crate::types::ProposalKind::RecoverStrandedFunds,
+        &recipient,
+        Some(&token),
+        amount_u32,
+    )?;
+
     // Check for replay protection
     let recovery_key = DataKey::Recovery(recovery_id.clone());
     if env.storage().persistent().has(&recovery_key) {
@@ -580,6 +715,9 @@ pub fn do_recover_stranded_funds(
 
     // Mark recovery as executed
     env.storage().persistent().set(&recovery_key, &true);
+
+    // Mark the multi-sig proposal as consumed
+    consume_multisig_proposal(env, proposal_id)?;
 
     let recovery_event = RecoveryEvent {
         admin: admin.clone(),
@@ -625,6 +763,15 @@ pub fn queue_treasury_change(
         return Err(Error::InvalidInput);
     }
 
+    // Require multi-sig approval for protocol fee changes
+    let proposal_id = require_multisig_approval(
+        env,
+        crate::types::ProposalKind::SetProtocolFee,
+        &treasury,
+        None,
+        fee_bps,
+    )?;
+
     let effective_at = env.ledger().timestamp().saturating_add(TREASURY_CHANGE_DELAY_SECS);
     let pending = PendingTreasuryChange {
         new_treasury: treasury.clone(),
@@ -639,6 +786,10 @@ pub fn queue_treasury_change(
     enforce_config_cooldown(env, "ProtocolFee")?;
     write_config(env, &DataKey::FeeBps, &fee_bps);
     write_config(env, &DataKey::Treasury, &treasury);
+    
+    // Mark the multi-sig proposal as consumed
+    consume_multisig_proposal(env, proposal_id)?;
+    
     env.events().publish(
         (Symbol::new(env, "treasury_change_queued"),),
         TreasuryChangeQueuedEvent {

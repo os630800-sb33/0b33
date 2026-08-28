@@ -1110,8 +1110,22 @@ impl SubscriptionVault {
         if get_emergency_stop(&env) {
             return Ok(());
         }
+        
+        // Require multi-sig approval for emergency stop
+        let proposal_id = admin::require_multisig_approval(
+            &env,
+            crate::types::ProposalKind::EmergencyStop,
+            &admin,
+            None,
+            1, // true = 1 for enabling emergency stop
+        )?;
+        
         admin::enforce_config_cooldown(&env, "EmergencyStop")?;
         admin::write_config(&env, &DataKey::EmergencyStop, &true);
+        
+        // Mark the multi-sig proposal as consumed
+        admin::consume_multisig_proposal(&env, proposal_id)?;
+        
         env.events().publish(
             (Symbol::new(&env, "emergency_stop_enabled"),),
             EmergencyStopEnabledEvent {
@@ -1129,8 +1143,22 @@ impl SubscriptionVault {
         if !get_emergency_stop(&env) {
             return Ok(());
         }
+        
+        // Require multi-sig approval for emergency stop
+        let proposal_id = admin::require_multisig_approval(
+            &env,
+            crate::types::ProposalKind::EmergencyStop,
+            &admin,
+            None,
+            0, // false = 0 for disabling emergency stop
+        )?;
+        
         admin::enforce_config_cooldown(&env, "EmergencyStop")?;
         admin::write_config(&env, &DataKey::EmergencyStop, &false);
+        
+        // Mark the multi-sig proposal as consumed
+        admin::consume_multisig_proposal(&env, proposal_id)?;
+        
         env.events().publish(
             (Symbol::new(&env, "emergency_stop_disabled"),),
             EmergencyStopDisabledEvent {
@@ -3513,5 +3541,60 @@ impl SubscriptionVault {
             .instance()
             .set(&DataKey::NextId, &(current + 1));
         Ok(current)
+    }
+
+    // ── Multi-Sig Governance ─────────────────────────────────────────────────────
+
+    /// Add a guardian with voting weight. Admin only.
+    pub fn add_guardian(env: Env, admin: Address, guardian: Address, weight: u32) -> Result<(), Error> {
+        require_admin_auth(&env, &admin)?;
+        crate::governance::add_guardian(&env, guardian, weight)
+    }
+
+    /// Remove a guardian. Admin only.
+    pub fn remove_guardian(env: Env, admin: Address, guardian: Address) -> Result<(), Error> {
+        require_admin_auth(&env, &admin)?;
+        crate::governance::remove_guardian(&env, &guardian)
+    }
+
+    /// Get a guardian's voting weight.
+    pub fn get_guardian_weight(env: Env, guardian: Address) -> u32 {
+        crate::governance::get_guardian_weight(&env, &guardian)
+    }
+
+    /// List all guardians and their weights.
+    pub fn list_guardians(env: Env) -> Vec<(Address, u32)> {
+        crate::governance::list_guardians(&env)
+    }
+
+    /// Submit a governance proposal for multi-sig approval of critical operations.
+    pub fn submit_proposal(
+        env: Env,
+        admin: Address,
+        kind: crate::types::ProposalKind,
+        target: Address,
+        target2: Option<Address>,
+        target3: u32,
+        quorum_bps: u32,
+        eta: u64,
+    ) -> Result<u64, Error> {
+        require_admin_auth(&env, &admin)?;
+        crate::governance::do_submit_proposal(&env, kind, target, target2, target3, quorum_bps, eta)
+    }
+
+    /// Vote on a governance proposal. Guardian only.
+    pub fn vote_proposal(env: Env, guardian: Address, proposal_id: u64, voted_yes: bool) -> Result<(), Error> {
+        guardian.require_auth();
+        crate::governance::do_vote_proposal(&env, proposal_id, voted_yes)
+    }
+
+    /// Get details of a governance proposal.
+    pub fn get_proposal(env: Env, proposal_id: u64) -> Option<crate::types::Proposal> {
+        crate::governance::get_proposal(&env, proposal_id)
+    }
+
+    /// Check if multi-sig enforcement is enabled.
+    pub fn is_multisig_enabled(env: Env) -> bool {
+        admin::is_multisig_enabled(&env)
     }
 }

@@ -785,7 +785,7 @@ pub struct DisputeResolvedEvent {
     pub schema_version: u32,
 }
 
-/// The privileged action a governance proposal executes once quorum is reached.
+/// Governance proposal types that require multi-sig guardian approval.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProposalKind {
@@ -796,7 +796,16 @@ pub enum ProposalKind {
     SetProtocolFee = 1,
     /// Reserved for a future contract-upgrade action.
     UpgradeContract = 2,
+    /// Enable or disable emergency stop (bool in `target3`).
+    EmergencyStop = 3,
+    /// Recover stranded funds to `Proposal::target` (amount in `target3`).
+    RecoverStrandedFunds = 4,
+    /// Add accepted token `Proposal::target` with decimals in `target3`.
+    AddAcceptedToken = 5,
+    /// Remove accepted token `Proposal::target`.
+    RemoveAcceptedToken = 6,
 }
+
 
 /// A quorum-gated governance proposal.
 #[contracttype]
@@ -1105,6 +1114,16 @@ pub enum Error {
     EscrowNotFound = 13004,
     /// The cancellation escrow release window has not elapsed yet.
     EscrowNotReleased = 13005,
+
+    // --- Multi-Sig Enforcement (15000-15099) ---
+    /// Multi-sig approval required for this admin operation.
+    MultiSigApprovalRequired = 15001,
+    /// No valid multi-sig proposal found for this operation.
+    MultiSigProposalNotFound = 15002,
+    /// Multi-sig proposal has not reached quorum yet.
+    MultiSigQuorumNotReached = 15003,
+    /// Multi-sig proposal has expired and cannot be executed.
+    MultiSigProposalExpired = 15004,
 }
 
 impl Error {
