@@ -196,7 +196,7 @@ pub fn do_init(
 
     write_config(env, &DataKey::Admin, &admin);
     write_config(env, &DataKey::MinTopup, &min_topup);
-    instance.set(&DataKey::GracePeriod, &grace_period);
+    write_config(env, &DataKey::GracePeriod, &grace_period);
 
     env.events().publish(
         (Symbol::new(env, "initialized"),),
@@ -269,18 +269,14 @@ pub fn get_min_topup(env: &Env) -> Result<i128, Error> {
 pub fn do_set_grace_period(env: &Env, admin: Address, grace_period: u64) -> Result<(), Error> {
     require_admin_auth(env, &admin)?;
     enforce_config_cooldown(env, "GracePeriod")?;
-    env.storage()
-        .instance()
-        .set(&DataKey::GracePeriod, &grace_period);
+    write_config(env, &DataKey::GracePeriod, &grace_period);
+    env.events()
+        .publish((Symbol::new(env, "grace_period_updated"),), grace_period);
     Ok(())
 }
 
 pub fn get_grace_period(env: &Env) -> Result<u64, Error> {
-    Ok(env
-        .storage()
-        .instance()
-        .get(&DataKey::GracePeriod)
-        .unwrap_or(0))
+    read_config(env, &DataKey::GracePeriod).ok_or(Error::NotInitialized)
 }
 
 pub fn do_set_subscriber_create_cap(env: &Env, admin: Address, cap: u32) -> Result<(), Error> {
@@ -943,7 +939,15 @@ pub fn do_migrate_config_to_persistent_internal(env: &Env) -> Result<(), Error> 
         instance.remove(&DataKey::MinTopup);
     }
 
-    // 4. NextId
+    // 4. GracePeriod
+    if instance.has(&DataKey::GracePeriod) {
+        let val: u64 = instance.get(&DataKey::GracePeriod).unwrap_or(0);
+        persistent.set(&DataKey::GracePeriod, &val);
+        crate::subscription::maybe_extend_ttl(env, &DataKey::GracePeriod, SUB_TTL_THRESHOLD, SUB_TTL_EXTEND_TO);
+        instance.remove(&DataKey::GracePeriod);
+    }
+
+    // 5. NextId
     if instance.has(&DataKey::NextId) {
         let val: u32 = instance.get(&DataKey::NextId).unwrap_or(0);
         persistent.set(&DataKey::NextId, &val);
