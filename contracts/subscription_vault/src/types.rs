@@ -58,8 +58,10 @@ pub const DOMAIN_DEPOSIT_FUNDS: u32 = 1;
 /// Replay protection domain for charge_one_off.
 pub const DOMAIN_CHARGE_ONEOFF: u32 = 2;
 
-/// Number of idempotent hashes to store per subscription.
-pub const IDEM_HISTORY: u32 = 32;
+/// Number of idempotency slots retained per subscription.
+///
+/// Must stay in sync with `idempotency::IDEM_HISTORY`.
+pub const IDEM_HISTORY: u32 = 64;
 
 /// Maximum fee in basis points (100.00%).
 pub const MAX_FEE_BIPS: i32 = 10000;
@@ -74,10 +76,13 @@ pub const MAX_FEE_BIPS: i32 = 10000;
 pub const MAX_PROTOCOL_FEE_BIPS: u32 = 500;
 
 /// Ring buffer for subscription-scoped idempotency hashes.
+///
+/// Each entry is `(hash, inserted_at_timestamp)`.  Entries older than
+/// `idempotency::IDEM_TTL_SECS` are treated as expired on lookup.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct IdemRingBuffer {
-    pub entries: Vec<BytesN<32>>,
+    pub entries: Vec<(BytesN<32>, u64)>,
     pub cursor: u32,
 }
 

@@ -678,7 +678,7 @@ pub fn charge_one(
                     subscription_id,
                     &k,
                 );
-                crate::idempotency::push_key(env, subscription_id, &hashed);
+                crate::idempotency::push_key(env, subscription_id, &hashed, now);
             }
 
             env.events().publish(

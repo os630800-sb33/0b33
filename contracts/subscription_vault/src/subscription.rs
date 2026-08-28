@@ -907,7 +907,7 @@ pub fn do_deposit_funds(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, env.ledger().timestamp());
     }
 
     Ok(())
@@ -1076,7 +1076,7 @@ pub fn do_grace_buyout(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, now);
     }
 
     Ok((charge_amount, premium))
@@ -2349,7 +2349,7 @@ pub fn do_charge_one_off(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, now);
     }
 
     Ok(())
@@ -2900,7 +2900,7 @@ pub fn do_deposit_funds_on_behalf(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, now);
     }
 
     Ok(())
