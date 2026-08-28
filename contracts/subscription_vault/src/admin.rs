@@ -8,7 +8,7 @@ use crate::types::{
     AcceptedToken, AdminConfigChangedEvent, AdminProposal, AdminProposalCancelledEvent,
     AdminProposalClaimedEvent, AdminProposalCreatedEvent, AdminRotatedEvent, BatchChargeResult,
     DataKey, Error, FeeTokenConfiguredEvent, PendingTreasuryChange, RecoveryEvent, RecoveryReason,
-    TreasuryChangeExecutedEvent, TreasuryChangeQueuedEvent, TOPIC_RECOVERY, SUB_TTL_EXTEND_TO,
+    TreasuryChangeExecutedEvent, TreasuryChangeQueuedEvent, BATCH_MAX_SIZE, TOPIC_RECOVERY, SUB_TTL_EXTEND_TO,
     SUB_TTL_THRESHOLD,
 };
 use crate::{
@@ -443,7 +443,27 @@ pub fn do_batch_charge(
 ) -> Result<Vec<BatchChargeResult>, Error> {
     let admin = require_stored_admin_auth(env)?;
 
-    // Nonce check must run before any state mutation to prevent replay.
+    // Validate batch size before processing
+    if subscription_ids.len() > BATCH_MAX_SIZE {
+        return Err(Error::BatchTooLarge);
+    }
+
+    // Deduplicate subscription IDs to prevent double-charging
+    // Empty batch is allowed as a no-op
+    if subscription_ids.len() == 0 {
+        return Ok(Vec::new(env));
+    }
+
+    // Check for duplicate IDs and reject the entire batch if found
+    let mut seen_ids = soroban_sdk::Vec::<u32>::new(env);
+    for id in subscription_ids.iter() {
+        if seen_ids.contains(&id) {
+            return Err(Error::InvalidInput); // Clear error for duplicate IDs
+        }
+        seen_ids.push_back(id);
+    }
+
+    // Nonce check must run after input validation but before any state mutation to prevent replay.
     // Domain DOMAIN_BATCH_CHARGE separates this counter from other admin ops.
     crate::nonce::check_and_advance(env, &admin, crate::nonce::DOMAIN_BATCH_CHARGE, nonce)?;
 
