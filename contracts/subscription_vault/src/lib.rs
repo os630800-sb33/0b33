@@ -957,6 +957,13 @@ impl SubscriptionVault {
     }
 
     /// Charge a batch of subscriptions in one transaction. Admin only.
+    ///
+    /// Subscriptions are charged sequentially and **the batch is not atomic**:
+    /// each charge that succeeds is committed immediately, so if a later id in
+    /// the same batch fails, the earlier successful charges are *not* rolled
+    /// back. The returned `Vec<BatchChargeResult>` is in request order and
+    /// reports, per id, whether it succeeded and (on failure) the error code,
+    /// so callers can determine exactly which ids were actually charged.
     pub fn batch_charge(
         env: Env,
         subscription_ids: Vec<u32>,
