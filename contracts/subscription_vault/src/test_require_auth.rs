@@ -138,7 +138,7 @@ fn deposit_funds_missing_auth() {
     let contract_id = env.register(SubscriptionVault, ());
     let client = SubscriptionVaultClient::new(&env, &contract_id);
     let subscriber = Address::generate(&env);
-    let _ = client.deposit_funds(&0u32, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>, &None::<soroban_sdk::BytesN<32>>);
+    let _ = client.deposit_funds(&0u32, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn deposit_funds_wrong_subscriber() {
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&attacker, &DEPOSIT);
     // mock_all_auths satisfies require_auth(), but the contract rejects because
     // attacker != sub.subscriber.
-    let _ = client.deposit_funds(&id, &attacker, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>, &None::<soroban_sdk::BytesN<32>>);
+    let _ = client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 }
 
 #[test]
@@ -160,9 +160,23 @@ fn deposit_funds_correct_auth() {
     let (env, client, token, _) = setup();
     let (id, subscriber, _) = make_subscription(&env, &client);
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&id, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
     let sub = client.get_subscription(&id);
     assert_eq!(sub.prepaid_balance, DEPOSIT);
+}
+
+#[test]
+fn deposit_funds_uses_subscription_subscriber() {
+    let (env, client, token, _) = setup();
+    let (id, subscriber, _) = make_subscription(&env, &client);
+    let attacker = Address::generate(&env);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
+
+    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+
+    let sub = client.get_subscription(&id);
+    assert_eq!(sub.prepaid_balance, DEPOSIT);
+    assert_ne!(attacker, subscriber);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -318,7 +332,7 @@ fn withdraw_merchant_funds_correct_auth() {
 
     // Deposit so the vault holds real tokens.
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&id, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 
     // Directly credit the merchant's ledger balance and mint matching vault tokens
     // so the withdrawal transfer can complete.  (A real charge flow would do this
@@ -512,7 +526,7 @@ fn bulk_deposit_funds_unauthorized_caller() {
     let (id, subscriber, _) = make_subscription(&env, &client);
     // Fund the subscription so the deposit could succeed.
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&id, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 
     // A random non-admin, non-operator caller.
     let random_caller = Address::generate(&env);

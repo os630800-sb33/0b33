@@ -17,11 +17,13 @@ fn test_fresh_init_stores_in_persistent() {
         assert!(storage.persistent().has(&DataKey::Token));
         assert!(storage.persistent().has(&DataKey::Admin));
         assert!(storage.persistent().has(&DataKey::MinTopup));
+        assert!(storage.persistent().has(&DataKey::GracePeriod));
         assert!(storage.persistent().has(&DataKey::SchemaVersion));
 
         assert!(!storage.instance().has(&DataKey::Token));
         assert!(!storage.instance().has(&DataKey::Admin));
         assert!(!storage.instance().has(&DataKey::MinTopup));
+        assert!(!storage.instance().has(&DataKey::GracePeriod));
         assert!(!storage.instance().has(&DataKey::SchemaVersion));
     });
 }
@@ -94,6 +96,7 @@ fn test_migration_moves_all_keys() {
     let treasury = Address::generate(&env);
     let fee_bps = 250u32;
     let operator = Address::generate(&env);
+    let grace_period = 86_400u64;
 
     env.as_contract(&contract_id, || {
         let storage = env.storage();
@@ -101,6 +104,7 @@ fn test_migration_moves_all_keys() {
         storage.instance().set(&DataKey::Token, &token);
         storage.instance().set(&DataKey::Admin, &admin);
         storage.instance().set(&DataKey::MinTopup, &min_topup);
+        storage.instance().set(&DataKey::GracePeriod, &grace_period);
         storage.instance().set(&DataKey::NextId, &next_id);
         storage.instance().set(&DataKey::EmergencyStop, &emergency_stop);
         storage.instance().set(&DataKey::Treasury, &treasury);
@@ -132,6 +136,7 @@ fn test_migration_moves_all_keys() {
         assert_eq!(storage.persistent().get::<_, Address>(&DataKey::Token), Some(token));
         assert_eq!(storage.persistent().get::<_, Address>(&DataKey::Admin), Some(admin.clone()));
         assert_eq!(storage.persistent().get::<_, i128>(&DataKey::MinTopup), Some(min_topup));
+        assert_eq!(storage.persistent().get::<_, u64>(&DataKey::GracePeriod), Some(grace_period));
         assert_eq!(storage.persistent().get::<_, u32>(&DataKey::NextId), Some(next_id));
         assert_eq!(storage.persistent().get::<_, bool>(&DataKey::EmergencyStop), Some(emergency_stop));
         assert_eq!(storage.persistent().get::<_, Address>(&DataKey::Treasury), Some(treasury));
@@ -143,6 +148,7 @@ fn test_migration_moves_all_keys() {
         assert!(!storage.instance().has(&DataKey::Token));
         assert!(!storage.instance().has(&DataKey::Admin));
         assert!(!storage.instance().has(&DataKey::MinTopup));
+        assert!(!storage.instance().has(&DataKey::GracePeriod));
         assert!(!storage.instance().has(&DataKey::NextId));
         assert!(!storage.instance().has(&DataKey::EmergencyStop));
         assert!(!storage.instance().has(&DataKey::Treasury));

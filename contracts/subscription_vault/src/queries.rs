@@ -16,6 +16,7 @@
 //! | `get_subscription` | Subscription record (subscriber, merchant, balance, status, …) | ✅ Yes | None — no admin secret or timelock exposed |
 //! | `estimate_topup_for_intervals` | Required top-up amount (pure math on subscription.amount) | ✅ Yes | None |
 //! | `get_subscriptions_by_merchant` | Slice of subscription records | ✅ Yes | None |
+//! | `get_subscriptions_by_merchant_paginated` | Paginated subscription records with cursor | ✅ Yes | None |
 //! | `get_merchant_subscription_count` | Index length (u32) | ✅ Yes | None |
 //! | `get_token_subscription_count` | Index length (u32) | ✅ Yes | None |
 //! | `get_subscriptions_by_token` | Slice of subscription records | ✅ Yes | None |
@@ -79,6 +80,7 @@
 //! | `get_subscription` | 1 | Direct key lookup |
 //! | `estimate_topup_for_intervals` | 1 | Calls `get_subscription` |
 //! | `get_subscriptions_by_merchant` | 1 + limit | 1 index read + up to `limit` sub reads |
+//! | `get_subscriptions_by_merchant_paginated` | 1 + limit | 1 index read + up to `limit` sub reads |
 //! | `get_merchant_subscription_count` | 1 | Index length only |
 //! | `get_subscriptions_by_token` | 1 + limit | 1 index read + up to `limit` sub reads |
 //! | `get_token_subscription_count` | 1 | Index length only |
@@ -103,7 +105,10 @@
 
 use crate::safe_math::{safe_mul, safe_sub};
 use crate::subscription::extend_subscription_ttl;
-use crate::types::{CapInfo, DataKey, Error, NextChargeInfo, Subscription, SubscriptionStatus};
+use crate::types::{
+    CapInfo, DataKey, Error, NextChargeInfo, Subscription, SubscriptionStatus,
+    SubscriptionsMerchantPage,
+};
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
 /// Maximum `limit` for [`get_subscriptions_by_merchant`] and [`get_subscriptions_by_token`]
@@ -207,6 +212,75 @@ pub fn get_merchant_subscription_count(env: &Env, merchant: Address) -> u32 {
     ids.len()
 }
 
+/// Returns subscriptions for a merchant with cursor-based pagination.
+///
+/// # Arguments
+/// - `merchant`: The merchant address whose subscriptions to fetch
+/// - `cursor`: Optional starting position (0-based index into the merchant's subscription list).
+///   Pass `None` to start from the beginning.
+/// - `limit`: Number of subscriptions to return (must be in `1..=MAX_SUBSCRIPTION_LIST_PAGE`)
+///
+/// # Returns
+/// A `SubscriptionsMerchantPage` containing:
+/// - `subscriptions`: Vector of subscription records for this page
+/// - `next_cursor`: Offset to use for the next page (if more results exist)
+/// - `total`: Total number of subscriptions for this merchant
+///
+/// # Errors
+/// - `InvalidInput` if limit is 0 or exceeds `MAX_SUBSCRIPTION_LIST_PAGE`
+///
+/// # Ordering
+/// Results follow insertion order (ascending subscription ID order) from the merchant's index.
+/// Missing subscription records are skipped; use `total` to determine the actual count.
+pub fn get_subscriptions_by_merchant_paginated(
+    env: &Env,
+    merchant: Address,
+    cursor: Option<u32>,
+    limit: u32,
+) -> Result<SubscriptionsMerchantPage, Error> {
+    if limit == 0 || limit > MAX_SUBSCRIPTION_LIST_PAGE {
+        return Err(Error::InvalidInput);
+    }
+
+    let key = DataKey::MerchantSubs(merchant);
+    let ids: Vec<u32> = env.storage().instance().get(&key).unwrap_or(Vec::new(env));
+    let total = ids.len();
+
+    let start = cursor.unwrap_or(0);
+    if start >= total {
+        return Ok(SubscriptionsMerchantPage {
+            subscriptions: Vec::new(env),
+            next_cursor: None,
+            total,
+        });
+    }
+
+    let end = if start + limit > total {
+        total
+    } else {
+        start + limit
+    };
+
+    let mut subscriptions = Vec::new(env);
+    for sub_id in ids.iter().skip(start as usize).take((end - start) as usize) {
+        if let Some(sub) = env
+            .storage()
+            .persistent()
+            .get::<_, Subscription>(&DataKey::Sub(sub_id))
+        {
+            subscriptions.push_back(sub);
+        }
+    }
+
+    let next_cursor = if end < total { Some(end) } else { None };
+
+    Ok(SubscriptionsMerchantPage {
+        subscriptions,
+        next_cursor,
+        total,
+    })
+}
+
 /// Number of subscription ids indexed for this token (length of the `token_subs` list).
 pub fn get_token_subscription_count(env: &Env, token: Address) -> u32 {
     let key = DataKey::TokenSubs(token);
@@ -307,8 +381,8 @@ pub fn get_cap_info(env: &Env, subscription_id: u32) -> Result<CapInfo, Error> {
 
     let (remaining_cap, cap_reached) = match sub.lifetime_cap {
         Some(cap) => {
-            let remaining = cap.saturating_sub(sub.lifetime_charged).max(0i128);
-            (Some(remaining), sub.lifetime_charged >= cap)
+            let remaining = crate::subscription::lifetime_cap_remaining(cap, sub.lifetime_charged);
+            (Some(remaining), crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged))
         }
         None => (None, false),
     };
@@ -463,8 +537,7 @@ pub fn get_token_reconciliation(env: &Env, token: Address) -> TokenLiabilities {
     let total_prepaid = compute_total_prepaid(env, &token);
 
     // Compute total merchant liabilities using precomputed total_prepaid
-    let total_merchant_liabilities =
-        compute_total_merchant_liabilities(env, &token, total_prepaid);
+    let total_merchant_liabilities = compute_total_merchant_liabilities(env, &token, total_prepaid);
 
     // Recoverable is the difference between contract balance and accounted funds
     let accounted = total_prepaid
@@ -472,9 +545,7 @@ pub fn get_token_reconciliation(env: &Env, token: Address) -> TokenLiabilities {
         .unwrap_or(0i128);
     let recoverable_amount = contract_balance.saturating_sub(accounted).max(0i128);
 
-    let computed_total = accounted
-        .checked_add(recoverable_amount)
-        .unwrap_or(0i128);
+    let computed_total = accounted.checked_add(recoverable_amount).unwrap_or(0i128);
 
     let is_balanced = contract_balance == computed_total;
 
