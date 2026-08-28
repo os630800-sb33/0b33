@@ -104,6 +104,7 @@ pub mod statements {
         subscription_id: u32,
         amount: i128,
         merchant: Address,
+        token: Address,
         kind: BillingChargeKind,
         period_start: u64,
         timestamp: u64,
@@ -121,6 +122,7 @@ pub mod statements {
             period_end: timestamp,
             amount,
             merchant,
+            token,
             kind,
         };
         env.storage()

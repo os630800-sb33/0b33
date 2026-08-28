@@ -381,8 +381,8 @@ pub fn get_cap_info(env: &Env, subscription_id: u32) -> Result<CapInfo, Error> {
 
     let (remaining_cap, cap_reached) = match sub.lifetime_cap {
         Some(cap) => {
-            let remaining = cap.saturating_sub(sub.lifetime_charged).max(0i128);
-            (Some(remaining), sub.lifetime_charged >= cap)
+            let remaining = crate::subscription::lifetime_cap_remaining(cap, sub.lifetime_charged);
+            (Some(remaining), crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged))
         }
         None => (None, false),
     };

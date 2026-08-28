@@ -274,7 +274,7 @@ pub fn charge_one(
     }
 
     if let Some(cap) = sub.lifetime_cap {
-        if sub.lifetime_charged >= cap {
+        if crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged) {
             if sub.status != SubscriptionStatus::Cancelled {
                 transition_to(&mut sub.status, SubscriptionStatus::Cancelled)?;
                 write_subscription(env, subscription_id, &sub);
@@ -446,7 +446,7 @@ pub fn charge_one(
 
     // -- Lifetime cap pre-check -----------------------------------------------
     if let Some(cap) = sub.lifetime_cap {
-        let remaining = if sub.lifetime_charged >= cap {
+        let remaining = if crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged) {
             0
         } else {
             safe_sub(cap, sub.lifetime_charged)?
@@ -586,7 +586,7 @@ pub fn charge_one(
             // Check if cap is now exactly reached -- auto-cancel
             let cap_reached = sub
                 .lifetime_cap
-                .map(|cap| sub.lifetime_charged >= cap)
+                .map(|cap| crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged))
                 .unwrap_or(false);
 
             if cap_reached {
@@ -634,6 +634,7 @@ pub fn charge_one(
                 subscription_id,
                 charge_amount,
                 sub.merchant.clone(),
+                sub.token.clone(),
                 BillingChargeKind::Interval,
                 next_allowed.saturating_sub(sub.interval_seconds),
                 now,
@@ -899,7 +900,7 @@ pub fn charge_usage_one(
     }
 
     if let Some(cap) = sub.lifetime_cap {
-        if sub.lifetime_charged >= cap {
+        if crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged) {
             if sub.status != SubscriptionStatus::Cancelled {
                 transition_to(&mut sub.status, SubscriptionStatus::Cancelled)?;
                 write_subscription(env, subscription_id, &sub);
@@ -1187,7 +1188,7 @@ pub fn charge_usage_one(
             sub.lifetime_charged = pending_lifetime;
             let cap_reached = sub
                 .lifetime_cap
-                .map(|cap| sub.lifetime_charged >= cap)
+                .map(|cap| crate::subscription::lifetime_cap_reached(cap, sub.lifetime_charged))
                 .unwrap_or(false);
 
             if cap_reached {
@@ -1264,6 +1265,7 @@ pub fn charge_usage_one(
                 subscription_id,
                 usage_amount,
                 sub.merchant.clone(),
+                sub.token.clone(),
                 BillingChargeKind::Usage,
                 now,
                 now,

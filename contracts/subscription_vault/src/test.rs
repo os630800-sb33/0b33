@@ -144,6 +144,44 @@ fn seed_merchant_balance(
 }
 
 #[test]
+fn test_plan_trial_period_delays_first_charge() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SubscriptionVault, ());
+    let client = SubscriptionVaultClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    client.init(&token, &6, &admin, &1_000_000i128, &(7 * 24 * 60 * 60));
+
+    let merchant = Address::generate(&env);
+    let trial = 7 * 24 * 60 * 60;
+    let plan_id = client.register_plan(
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &trial,
+        &false,
+        &None::<i128>,
+    );
+
+    let plan = client.get_plan_template(&plan_id);
+    assert_eq!(plan.trial_period_seconds, Some(trial));
+
+    let subscriber = Address::generate(&env);
+    let sub_id = client.create_subscription_from_plan(&subscriber, &plan_id);
+    let sub = client.get_subscription(&sub_id);
+
+    assert_eq!(sub.last_payment_timestamp, sub.start_time + trial);
+    assert_eq!(
+        sub.start_time + trial + INTERVAL,
+        client.get_next_charge_info(&sub_id).next_charge_timestamp
+    );
+}
+
+#[test]
 fn test_treasury_change_timelock_queue_execute_and_cancel() {
     let env = Env::default();
     env.mock_all_auths();
@@ -8801,6 +8839,7 @@ fn test_offset_pagination_ordering_newest_first() {
                 sub_id,
                 1000 + i as i128,
                 Address::generate(&env),
+                Address::generate(&env),
                 crate::types::BillingChargeKind::Interval,
                 i as u64,
                 i as u64 + 10,
@@ -8829,6 +8868,7 @@ fn test_offset_pagination_ordering_oldest_first() {
                 sub_id,
                 1000 + i as i128,
                 Address::generate(&env),
+                Address::generate(&env),
                 crate::types::BillingChargeKind::Interval,
                 i as u64,
                 i as u64 + 10,
@@ -8854,6 +8894,7 @@ fn test_cursor_pagination_continuity() {
                 &env,
                 sub_id,
                 1000 + i as i128,
+                Address::generate(&env),
                 Address::generate(&env),
                 crate::types::BillingChargeKind::Interval,
                 i as u64,
@@ -8896,6 +8937,7 @@ fn test_cursor_termination() {
                 &env,
                 sub_id,
                 1000 + i as i128,
+                Address::generate(&env),
                 Address::generate(&env),
                 crate::types::BillingChargeKind::Interval,
                 i as u64,
