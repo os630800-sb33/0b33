@@ -170,6 +170,20 @@ pub fn charge_one(
     idempotency_key: Option<soroban_sdk::BytesN<32>>,
     admin_config: Option<&crate::admin::CachedAdminConfig>,
 ) -> Result<ChargeExecutionResult, Error> {
+    // ── CRITICAL: Atomic emergency stop check ────────────────────────────────
+    // Re-check emergency stop on every iteration to prevent in-flight batch_charge
+    // from completing when emergency_stop is triggered mid-execution.
+    // This fixes the race condition where the flag is only checked at entry-point.
+    if crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false) {
+        return Err(charge_fail(
+            env,
+            subscription_id,
+            crate::types::Error::EmergencyStopActive,
+            0,
+            now,
+        ));
+    }
+
     let mut sub = get_subscription(env, subscription_id)
         .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
 
@@ -819,6 +833,20 @@ pub fn charge_usage_one(
     usage_amount: i128,
     reference: String,
 ) -> Result<UsageChargeResult, Error> {
+    // ── CRITICAL: Atomic emergency stop check ────────────────────────────────
+    // Re-check emergency stop on every iteration to prevent in-flight charging
+    // operations from completing when emergency_stop is triggered mid-execution.
+    let now = env.ledger().timestamp();
+    if crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false) {
+        return Err(charge_fail(
+            env,
+            subscription_id,
+            crate::types::Error::EmergencyStopActive,
+            0,
+            now,
+        ));
+    }
+
     let mut sub = get_subscription(env, subscription_id)
         .map_err(|e| charge_fail(env, subscription_id, e, 0, env.ledger().timestamp()))?;
     let merchant = sub.merchant.clone();
