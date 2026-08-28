@@ -1826,17 +1826,14 @@ fn test_batch_charge_duplicate_ids() {
 
     env.ledger().set_timestamp(T0 + INTERVAL + 1);
     let ids = Vec::from_array(&env, [id, id]);
-    let results = client.batch_charge(&ids, &0u64);
+    
+    // With the fix, duplicate IDs should be rejected upfront with InvalidInput
+    let result = client.try_batch_charge(&ids, &0u64);
+    assert_eq!(result, Err(Ok(Error::InvalidInput)));
 
-    assert_eq!(results.len(), 2);
-    // First should succeed
-    assert!(results.get(0).unwrap().success);
-    // Second should fail with Replay (1007)
-    assert!(!results.get(1).unwrap().success);
-    assert_eq!(results.get(1).unwrap().error_code, Error::Replay as u32);
-
+    // Verify no charge occurred since the batch was rejected
     let sub = client.get_subscription(&id);
-    assert_eq!(sub.prepaid_balance, PREPAID * 2 - AMOUNT);
+    assert_eq!(sub.prepaid_balance, PREPAID * 2); // No charge should have happened
 }
 
 #[test]
@@ -2380,6 +2377,96 @@ fn test_batch_charge_high_volume_list_matches_single_path_semantics() {
             test_env_single.client.get_merchant_balance(merchant_single)
         );
     }
+}
+
+// -- Batch charge deduplication comprehensive tests --------------------------
+
+#[test]
+fn test_batch_charge_comprehensive_deduplication_patterns() {
+    let test_env = TestEnv::default();
+    test_env.env.ledger().with_mut(|li| li.timestamp = T0);
+    
+    // Create test subscriptions
+    let (id1, _, _) = create_test_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    let (id2, _, _) = create_test_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    
+    // Seed balances
+    seed_balance(&test_env.env, &test_env.client, id1, PREPAID);
+    seed_balance(&test_env.env, &test_env.client, id2, PREPAID);
+    
+    test_env.env.ledger().with_mut(|li| li.timestamp = T0 + INTERVAL + 1);
+    
+    // Test various duplicate patterns - all should be rejected with InvalidInput
+    let test_cases = vec![
+        Vec::from_array(&test_env.env, [id1, id1]),                    // Same ID twice
+        Vec::from_array(&test_env.env, [id1, id1, id1]),               // Same ID three times  
+        Vec::from_array(&test_env.env, [id1, id2, id1]),               // Different IDs with duplicate
+        Vec::from_array(&test_env.env, [id1, id2, id1, id2]),          // Multiple duplicates
+        Vec::from_array(&test_env.env, [id2, id1, id1]),               // Adjacent duplicates
+    ];
+    
+    for (i, duplicate_ids) in test_cases.iter().enumerate() {
+        let result = test_env.client.try_batch_charge(duplicate_ids, &(i as u64));
+        assert_eq!(result, Err(Ok(Error::InvalidInput)), "Pattern {} should be rejected", i);
+    }
+    
+    // Verify no charges occurred - balances should be unchanged
+    assert_eq!(test_env.client.get_subscription(&id1).prepaid_balance, PREPAID);
+    assert_eq!(test_env.client.get_subscription(&id2).prepaid_balance, PREPAID);
+}
+
+#[test]
+fn test_batch_charge_nonce_handling_with_deduplication() {
+    let test_env = TestEnv::default();
+    test_env.env.ledger().with_mut(|li| li.timestamp = T0);
+    
+    let (id1, _, _) = create_test_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    seed_balance(&test_env.env, &test_env.client, id1, PREPAID);
+    test_env.env.ledger().with_mut(|li| li.timestamp = T0 + INTERVAL + 1);
+    
+    let initial_nonce = test_env.client.get_admin_nonce();
+    
+    // Try batch with duplicates - should fail before nonce consumption
+    let duplicate_ids = Vec::from_array(&test_env.env, [id1, id1]);
+    let result = test_env.client.try_batch_charge(&duplicate_ids, &initial_nonce);
+    assert_eq!(result, Err(Ok(Error::InvalidInput)));
+    
+    // Nonce should NOT be consumed on validation failure
+    assert_eq!(test_env.client.get_admin_nonce(), initial_nonce);
+    
+    // Now successful batch with same nonce should work
+    let unique_ids = Vec::from_array(&test_env.env, [id1]);
+    let results = test_env.client.batch_charge(&unique_ids, &initial_nonce);
+    assert!(results.get(0).unwrap().success);
+    
+    // Now nonce should be consumed
+    assert_eq!(test_env.client.get_admin_nonce(), initial_nonce + 1);
+}
+
+#[test]
+fn test_batch_charge_size_limit_with_duplicates() {
+    let test_env = TestEnv::default();
+    let (id1, _, _) = create_test_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    
+    // Create batch larger than BATCH_MAX_SIZE - size check should happen first
+    let mut large_batch = Vec::<u32>::new(&test_env.env);
+    for _i in 0..(crate::types::BATCH_MAX_SIZE + 1) {
+        large_batch.push_back(id1);
+    }
+    
+    let result = test_env.client.try_batch_charge(&large_batch, &0u64);
+    // Size limit should be enforced before deduplication check
+    assert_eq!(result, Err(Ok(Error::BatchTooLarge)));
+}
+
+#[test]
+fn test_batch_charge_empty_batch_allowed() {
+    let test_env = TestEnv::default();
+    
+    // Empty batch should be accepted as no-op
+    let empty_ids = Vec::<u32>::new(&test_env.env);
+    let results = test_env.client.batch_charge(&empty_ids, &0u64);
+    assert_eq!(results.len(), 0);
 }
 
 // -- Next charge info test ----------------------------------------------------

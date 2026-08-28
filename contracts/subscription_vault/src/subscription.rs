@@ -66,7 +66,7 @@ use crate::safe_math::{safe_add, safe_add_balance, safe_sub};
 use crate::state_machine::transition_to;
 use crate::statements::append_statement;
 use crate::types::{
-    BillingChargeKind, DataKey, EmergencyWithdrawIntent, Error, FundsDepositedEvent,
+    BillingChargeKind, CancellationEscrow, CancellationEscrowReleasedEvent, DataKey, EmergencyWithdrawIntent, Error, FundsDepositedEvent,
     GlobalCapDefaultUpdatedEvent, LifetimeCapReachedEvent, LifetimeCapUpdatedEvent,
     MerchantCapDefaultUpdatedEvent, PartialRefundEvent, PlanMaxActiveUpdatedEvent, PlanTemplate,
     PlanTemplateUpdatedEvent, SubscriberEmergencyWithdrawEvent, SubscriberWithdrawalEvent,
@@ -1089,9 +1089,22 @@ pub fn do_cancel_subscription(
 ) -> Result<(), Error> {
     authorizer.require_auth();
 
-    let sub = get_subscription(env, subscription_id)?;
+    let mut sub = get_subscription(env, subscription_id)?;
 
+    // Expiration guard
     if sub.is_expired(env.ledger().timestamp(), env.ledger().sequence()) {
+        if sub.status != SubscriptionStatus::Expired {
+            transition_to(&mut sub.status, SubscriptionStatus::Expired)?;
+            write_subscription(env, subscription_id, &sub);
+            env.events().publish(
+                (Symbol::new(env, "subscription_expired"), subscription_id),
+                crate::types::SubscriptionExpiredEvent {
+                    subscription_id,
+                    timestamp: env.ledger().timestamp(),
+                    schema_version: crate::types::EVENT_SCHEMA_VERSION,
+                },
+            );
+        }
         return Err(Error::SubscriptionExpired);
     }
 
@@ -1289,7 +1302,20 @@ pub fn do_schedule_cancel(
     if sub.status == SubscriptionStatus::Cancelled {
         return Err(Error::InvalidStatusTransition);
     }
+    // Expiration guard
     if sub.is_expired(now, env.ledger().sequence()) {
+        if sub.status != SubscriptionStatus::Expired {
+            transition_to(&mut sub.status, SubscriptionStatus::Expired)?;
+            write_subscription(env, subscription_id, &sub);
+            env.events().publish(
+                (Symbol::new(env, "subscription_expired"), subscription_id),
+                crate::types::SubscriptionExpiredEvent {
+                    subscription_id,
+                    timestamp: now,
+                    schema_version: crate::types::EVENT_SCHEMA_VERSION,
+                },
+            );
+        }
         return Err(Error::SubscriptionExpired);
     }
 
@@ -1445,9 +1471,22 @@ pub fn do_pause_subscription(
 ) -> Result<(), Error> {
     authorizer.require_auth();
 
-    let sub = get_subscription(env, subscription_id)?;
+    let mut sub = get_subscription(env, subscription_id)?;
 
+    // Expiration guard
     if sub.is_expired(env.ledger().timestamp(), env.ledger().sequence()) {
+        if sub.status != SubscriptionStatus::Expired {
+            transition_to(&mut sub.status, SubscriptionStatus::Expired)?;
+            write_subscription(env, subscription_id, &sub);
+            env.events().publish(
+                (Symbol::new(env, "subscription_expired"), subscription_id),
+                crate::types::SubscriptionExpiredEvent {
+                    subscription_id,
+                    timestamp: env.ledger().timestamp(),
+                    schema_version: crate::types::EVENT_SCHEMA_VERSION,
+                },
+            );
+        }
         return Err(Error::SubscriptionExpired);
     }
 
@@ -1517,7 +1556,20 @@ pub fn do_resume_subscription(
 
     let mut sub = get_subscription(env, subscription_id)?;
 
+    // Expiration guard
     if sub.is_expired(env.ledger().timestamp(), env.ledger().sequence()) {
+        if sub.status != SubscriptionStatus::Expired {
+            transition_to(&mut sub.status, SubscriptionStatus::Expired)?;
+            write_subscription(env, subscription_id, &sub);
+            env.events().publish(
+                (Symbol::new(env, "subscription_expired"), subscription_id),
+                crate::types::SubscriptionExpiredEvent {
+                    subscription_id,
+                    timestamp: env.ledger().timestamp(),
+                    schema_version: crate::types::EVENT_SCHEMA_VERSION,
+                },
+            );
+        }
         return Err(Error::SubscriptionExpired);
     }
     if authorizer != sub.subscriber && authorizer != sub.merchant {
@@ -1626,7 +1678,19 @@ fn bulk_pause_one(
         Err(e) => return bulk_failed(subscription_id, e),
     };
 
+    // Expiration guard
     if sub.is_expired(env.ledger().timestamp(), env.ledger().sequence()) {
+        // For bulk operations, we emit the event but can't modify sub directly since
+        // we're not returning a mutable reference. The event emission is still important
+        // for indexers to track expiration during bulk operations.
+        env.events().publish(
+            (Symbol::new(env, "subscription_expired"), subscription_id),
+            crate::types::SubscriptionExpiredEvent {
+                subscription_id,
+                timestamp: env.ledger().timestamp(),
+                schema_version: crate::types::EVENT_SCHEMA_VERSION,
+            },
+        );
         return bulk_failed(subscription_id, Error::SubscriptionExpired);
     }
 
@@ -1656,7 +1720,19 @@ fn bulk_cancel_one(
         Err(e) => return bulk_failed(subscription_id, e),
     };
 
+    // Expiration guard
     if sub.is_expired(env.ledger().timestamp(), env.ledger().sequence()) {
+        // For bulk operations, we emit the event but can't modify sub directly since
+        // we're not returning a mutable reference. The event emission is still important
+        // for indexers to track expiration during bulk operations.
+        env.events().publish(
+            (Symbol::new(env, "subscription_expired"), subscription_id),
+            crate::types::SubscriptionExpiredEvent {
+                subscription_id,
+                timestamp: env.ledger().timestamp(),
+                schema_version: crate::types::EVENT_SCHEMA_VERSION,
+            },
+        );
         return bulk_failed(subscription_id, Error::SubscriptionExpired);
     }
 
@@ -2462,15 +2538,67 @@ pub fn do_withdraw_subscriber_funds(
         return Err(Error::InvalidStatusTransition);
     }
 
-    let amount_to_refund = sub.prepaid_balance;
+    let mut amount_to_refund = sub.prepaid_balance;
+    let mut has_escrow = false;
+    
+    // If no prepaid balance, check if there's a claimable escrow
+    if amount_to_refund <= 0 {
+        if let Some(escrow) = env
+            .storage()
+            .persistent()
+            .get::<_, CancellationEscrow>(&DataKey::CancellationEscrow(subscription_id))
+        {
+            if subscriber != escrow.subscriber {
+                return Err(Error::Forbidden);
+            }
+            
+            let now = env.ledger().timestamp();
+            if now < escrow.released_at {
+                return Err(Error::EscrowNotReleased);
+            }
+            
+            // Check if there's an active dispute
+            if env
+                .storage()
+                .instance()
+                .has(&DataKey::SubscriptionDispute(subscription_id))
+            {
+                return Err(Error::DisputeAlreadyOpen);
+            }
+            
+            amount_to_refund = escrow.amount;
+            has_escrow = true;
+        } else {
+            return Err(Error::InvalidAmount);
+        }
+    }
+
     if amount_to_refund <= 0 {
         return Err(Error::InvalidAmount);
     }
 
-    // EFFECTS: zero the balance before the external token transfer (CEI pattern).
-    sub.prepaid_balance = 0;
-    let token_addr = sub.token.clone();
-    write_subscription(env, subscription_id, &sub);
+    let token_addr = if has_escrow {
+        // Get token address from escrow
+        env.storage()
+            .persistent()
+            .get::<_, CancellationEscrow>(&DataKey::CancellationEscrow(subscription_id))
+            .unwrap()
+            .token
+    } else {
+        sub.token.clone()
+    };
+
+    // EFFECTS: Update state before external interactions (CEI pattern)
+    if has_escrow {
+        // Remove escrow record
+        env.storage()
+            .persistent()
+            .remove(&DataKey::CancellationEscrow(subscription_id));
+    } else {
+        // Zero the prepaid balance
+        sub.prepaid_balance = 0;
+        write_subscription(env, subscription_id, &sub);
+    }
 
     // INTERACTIONS: transfer refund from vault to subscriber.
     let token_client = soroban_sdk::token::Client::new(env, &token_addr);
@@ -2480,6 +2608,20 @@ pub fn do_withdraw_subscriber_funds(
         &amount_to_refund,
     );
     crate::accounting::sub_total_accounted(env, &token_addr, amount_to_refund)?;
+
+    if has_escrow {
+        // Emit escrow release event for consistency
+        env.events().publish(
+            (Symbol::new(env, "cancellation_escrow_released"), subscription_id),
+            CancellationEscrowReleasedEvent {
+                subscription_id,
+                subscriber: subscriber.clone(),
+                amount: amount_to_refund,
+                timestamp: env.ledger().timestamp(),
+                schema_version: crate::types::EVENT_SCHEMA_VERSION,
+            },
+        );
+    }
 
     env.events().publish(
         (Symbol::new(env, "sub_withdrawn"), subscription_id),
@@ -3597,7 +3739,20 @@ pub fn do_initiate_transfer(
     if sub.status == SubscriptionStatus::Cancelled {
         return Err(Error::InvalidStatusTransition);
     }
+    // Expiration guard
     if sub.is_expired(env.ledger().timestamp(), env.ledger().sequence()) {
+        if sub.status != SubscriptionStatus::Expired {
+            transition_to(&mut sub.status, SubscriptionStatus::Expired)?;
+            write_subscription(env, subscription_id, &sub);
+            env.events().publish(
+                (Symbol::new(env, "subscription_expired"), subscription_id),
+                crate::types::SubscriptionExpiredEvent {
+                    subscription_id,
+                    timestamp: env.ledger().timestamp(),
+                    schema_version: crate::types::EVENT_SCHEMA_VERSION,
+                },
+            );
+        }
         return Err(Error::SubscriptionExpired);
     }
 
