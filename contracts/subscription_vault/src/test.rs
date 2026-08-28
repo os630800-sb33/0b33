@@ -1712,6 +1712,28 @@ fn test_remove_from_blocklist_requires_admin_and_existing_entry() {
     assert_eq!(unauthorized, Err(Ok(Error::Forbidden)));
 }
 
+#[test]
+fn test_remove_from_blocklist_fails_with_open_dispute() {
+    let test_env = TestEnv::default();
+    let (id, subscriber, _merchant) =
+        fixtures::create_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    charge_and_seed_merchant(&test_env, id);
+
+    test_env
+        .client
+        .open_dispute(&subscriber, &id, &DISPUTE_AMOUNT, &None::<soroban_sdk::BytesN<32>>)
+        .unwrap();
+
+    test_env
+        .client
+        .add_to_blocklist(&test_env.admin, &subscriber, &None::<String>);
+
+    let result = test_env
+        .client
+        .try_remove_from_blocklist(&test_env.admin, &subscriber);
+    assert_eq!(result, Err(Ok(Error::SubscriberHasOpenDisputes)));
+}
+
 // -- Admin tests --------------------------------------------------------------
 
 #[test]

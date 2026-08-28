@@ -342,7 +342,7 @@ fn test_charge_with_discount() {
 
     client
         .mock_all_auths()
-        .set_protocol_fee(&admin, &treasury, &1000); // 10% fee
+        .set_protocol_fee(&admin, &treasury, &500); // 5% fee
 
     // 50% discount
     client
