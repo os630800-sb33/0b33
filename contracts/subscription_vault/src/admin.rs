@@ -606,7 +606,9 @@ pub fn do_recover_stranded_funds(
 
 /// Set protocol fee basis points and treasury address. Admin only.
 ///
-/// fee_bps must be in 0..=10_000. Setting fee_bps to 0 disables fee collection.
+/// fee_bps must be in 0..=MAX_PROTOCOL_FEE_BIPS (500). Setting fee_bps to 0
+/// disables fee collection. Values above the cap are rejected with
+/// `ProtocolFeeTooHigh`.
 const TREASURY_CHANGE_DELAY_SECS: u64 = 48 * 24 * 60 * 60;
 
 pub fn queue_treasury_change(
@@ -616,8 +618,8 @@ pub fn queue_treasury_change(
     fee_bps: u32,
 ) -> Result<(), Error> {
     require_admin_auth(env, &admin)?;
-    if fee_bps > 10_000 {
-        return Err(Error::InvalidInput);
+    if fee_bps > MAX_PROTOCOL_FEE_BIPS {
+        return Err(Error::ProtocolFeeTooHigh);
     }
     if env.storage().persistent().has(&DataKey::PendingTreasuryChange) {
         return Err(Error::InvalidInput);
@@ -767,6 +769,7 @@ pub fn do_set_auto_pause_threshold(env: &Env, admin: Address, threshold: u32) ->
 // ── Two-step admin proposal ──────────────────────────────────────────────────
 
 const PROPOSAL_WINDOW_SECS: u64 = 7 * 24 * 60 * 60;
+const ADMIN_PROPOSAL_COOLDOWN_SECS: u64 = 24 * 60 * 60;
 
 fn proposal_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin_proposal")
@@ -817,6 +820,10 @@ pub fn do_claim_admin_role(env: &Env, claimant: Address) -> Result<(), Error> {
         .ok_or(Error::ProposalNotFound)?;
 
     let now = env.ledger().timestamp();
+    if now < proposal.proposed_at.saturating_add(ADMIN_PROPOSAL_COOLDOWN_SECS) {
+        return Err(Error::ProposalCooldownActive);
+    }
+
     if now > proposal.expires_at {
         storage.remove(&proposal_key(env));
         return Err(Error::ProposalExpired);

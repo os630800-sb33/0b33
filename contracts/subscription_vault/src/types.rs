@@ -64,6 +64,15 @@ pub const IDEM_HISTORY: u32 = 32;
 /// Maximum fee in basis points (100.00%).
 pub const MAX_FEE_BIPS: i32 = 10000;
 
+/// Hard cap for the *protocol* fee (5.00%).
+///
+/// `MAX_FEE_BIPS` (10 000) is the absolute ceiling used for per-merchant
+/// fee-bips validation.  Protocol-level fees are capped much lower to
+/// prevent a malicious or mistaken admin from routing all funds to the
+/// treasury.  Any call to `set_protocol_fee` / `queue_treasury_change`
+/// with a value above this limit is rejected with `ProtocolFeeTooHigh`.
+pub const MAX_PROTOCOL_FEE_BIPS: u32 = 500;
+
 /// Ring buffer for subscription-scoped idempotency hashes.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -912,6 +921,8 @@ pub enum Error {
     InvalidExpiration = 3008,
     /// Oracle price deviation exceeds configured threshold (circuit breaker).
     OracleDeviationTooHigh = 3009,
+    /// Protocol fee exceeds the hard cap (`MAX_PROTOCOL_FEE_BIPS`).
+    ProtocolFeeTooHigh = 3010,
 
     // --- State Transition (4000-4099) ---
     /// The requested state transition is not allowed by the state machine.
@@ -1042,6 +1053,8 @@ pub enum Error {
     DisputeAlreadyResponded = 10006,
     /// Dispute resolution would overpay — total disbursed cannot exceed escrowed amount.
     DisputeOverpay = 10007,
+    /// Blocklist removal is rejected because the subscriber has open disputes.
+    SubscriberHasOpenDisputes = 10008,
 
     // --- Subscription Transfer (11000-11099) ---
     /// The transfer intent was not found or has expired.
@@ -1084,6 +1097,8 @@ pub enum Error {
     ProposalAlreadyExists = 14004,
     /// No active proposal to cancel.
     NoActiveProposal = 14005,
+    /// The admin proposal cooldown has not elapsed yet.
+    ProposalCooldownActive = 14006,
 
     // --- Cancellation Escrow (13000-13099) ---
     /// No cancellation escrow found for this subscription.
@@ -1610,6 +1625,13 @@ pub enum OracleKind {
 pub struct OracleConfig {
     pub enabled: bool,
     pub oracle: Option<Address>,
+    /// The maximum allowed age (in ledger seconds) for a price observation before it is 
+    /// considered stale. 
+    /// 
+    /// **Security Note:** Stellar validators can shift ledger close times within protocol 
+    /// bounds. A very tight staleness window (e.g. under 30-60 seconds) can be manipulated 
+    /// to make fresh prices appear stale, causing legitimate charges to fail with `OraclePriceStale`. 
+    /// It is strongly recommended to set a minimum safe window of at least 60 seconds.
     pub max_age_seconds: u64,
     /// Which pricing strategy to use when resolving charge amounts.
     pub kind: OracleKind,
