@@ -62,7 +62,7 @@
 //! concurrency or subscriber credit limits.
 
 use crate::queries::get_subscription;
-use crate::safe_math::{safe_add, safe_add_balance, safe_sub};
+use crate::safe_math::{safe_add, safe_add_balance, safe_sub, safe_sub_balance};
 use crate::state_machine::transition_to;
 use crate::statements::append_statement;
 use crate::types::{
@@ -970,10 +970,7 @@ pub fn do_grace_buyout(
         .checked_add(amount)
         .ok_or(Error::Overflow)?;
 
-    let new_balance = sub
-        .prepaid_balance
-        .checked_sub(charge_amount)
-        .ok_or(Error::InsufficientBalance)?;
+    let new_balance = safe_sub_balance(sub.prepaid_balance, charge_amount)?;
     sub.prepaid_balance = new_balance;
 
     let now = env.ledger().timestamp();
@@ -2260,7 +2257,8 @@ pub fn do_charge_one_off(
     let (merchant_amount, fee_amount) = if fee_bps > 0 {
         if let Some(ref _t) = treasury_opt {
             let fee = amount * fee_bps as i128 / 10_000i128;
-            (amount - fee, fee)
+            let net = safe_sub(amount, fee)?;
+            (net, fee)
         } else {
             (amount, 0i128)
         }
