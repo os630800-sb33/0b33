@@ -97,19 +97,21 @@ the persistent `DataKey::Sub(subscription_id)` record.
 
 ```rust
 pub struct IdemRingBuffer {
-    pub entries: Vec<BytesN<32>>,
+    pub entries: Vec<(BytesN<32>, u64)>,  // (hash, inserted_at_timestamp)
     pub cursor: u32,
 }
 ```
 
-`entries` contains the domain-separated SHA-256 fingerprints of recently used
-idempotency keys. The buffer retains at most `IDEM_HISTORY` entries (currently
-10 in `contracts/subscription_vault/src/idempotency.rs`) per subscription.
-When full, inserting a new fingerprint silently overwrites the oldest entry at
-`cursor`; the cursor then advances modulo `IDEM_HISTORY`. Consequently,
-idempotency protection is a bounded recent-history guarantee: a key can become
-usable again after it has been evicted by enough newer keys. A missing key has
-an empty buffer and is initialized on the first insertion.
+`entries` contains tuples of `(domain-separated SHA-256 fingerprint, ledger timestamp at insertion)`.
+The buffer retains at most `IDEM_HISTORY = 64` entries per subscription.
+When full, inserting a new fingerprint silently overwrites the oldest slot at `cursor`;
+the cursor then advances modulo `IDEM_HISTORY`.
+
+Entries older than `IDEM_TTL_SECS = 7 days` are skipped on lookup and treated as absent,
+regardless of ring position. Replay protection is therefore bounded by **both** time and count:
+a key is protected for up to 7 days from insertion, or until 64 newer keys have overwritten
+its slot — whichever comes first. A missing key (empty buffer or deserialization failure
+from a pre-migration on-chain buffer) initializes to an empty buffer on the first insertion.
 
 The hash includes the operation domain, subscription ID, and raw 32-byte key,
 so the same raw key used by different entrypoints does not collide. The
