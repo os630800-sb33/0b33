@@ -705,6 +705,16 @@ pub fn do_create_subscription_with_token(
     token_ids.push_back(id);
     env.storage().instance().set(&token_key, &token_ids);
 
+    // Maintain subscriber -> subscription-ID index
+    let subscriber_key = DataKey::SubscriberSubs(subscriber.clone());
+    let mut subscriber_ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&subscriber_key)
+        .unwrap_or(Vec::new(env));
+    subscriber_ids.push_back(id);
+    env.storage().instance().set(&subscriber_key, &subscriber_ids);
+
     env.events().publish(
         (Symbol::new(env, "subscription_created"), id),
         SubscriptionCreatedEvent {
@@ -1621,7 +1631,7 @@ fn apply_pause(
         (Symbol::new(env, "sub_paused"), subscription_id),
         crate::types::SubscriptionPausedEvent {
             subscription_id,
-            authorizer,
+            paused_by: authorizer,
             timestamp: env.ledger().timestamp(),
             schema_version: crate::types::EVENT_SCHEMA_VERSION,
         },
@@ -3439,6 +3449,16 @@ pub fn do_create_subscription_from_plan(
         .unwrap_or(Vec::new(env));
     token_ids.push_back(id);
     env.storage().instance().set(&token_key, &token_ids);
+
+    // Maintain subscriber -> subscription-ID index
+    let subscriber_key = DataKey::SubscriberSubs(subscriber.clone());
+    let mut subscriber_ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&subscriber_key)
+        .unwrap_or(Vec::new(env));
+    subscriber_ids.push_back(id);
+    env.storage().instance().set(&subscriber_key, &subscriber_ids);
 
     env.events().publish(
         (TOPIC_CREATED, id),

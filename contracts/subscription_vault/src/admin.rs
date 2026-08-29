@@ -335,10 +335,19 @@ pub fn do_set_min_topup(env: &Env, admin: Address, min_topup: i128) -> Result<()
     if min_topup <= 0 {
         return Err(Error::InvalidAmount);
     }
+    let old_min_topup = get_min_topup(env).unwrap_or(0);
     enforce_config_cooldown(env, "MinTopup")?;
     write_config(env, &DataKey::MinTopup, &min_topup);
-    env.events()
-        .publish((Symbol::new(env, "min_topup_updated"),), min_topup);
+    env.events().publish(
+        (Symbol::new(env, "min_topup_updated"),),
+        crate::types::MinTopupUpdatedEvent {
+            admin,
+            old_min_topup,
+            new_min_topup: min_topup,
+            timestamp: env.ledger().timestamp(),
+            schema_version: crate::types::EVENT_SCHEMA_VERSION,
+        },
+    );
     Ok(())
 }
 
@@ -503,13 +512,16 @@ pub(crate) fn execute_batch_charge(
     let now = env.ledger().timestamp();
     // Read all admin config values once so they are cached across the batch loop.
     let cached_admin = read_cached_admin_config(env);
+    // Cache per-merchant paused/vacation status across the batch loop so
+    // subscriptions sharing a merchant only hit storage once for it.
+    let mut merchant_cache: soroban_sdk::Map<Address, (bool, bool)> = soroban_sdk::Map::new(env);
     let mut results = Vec::new(env);
     for id in subscription_ids.iter() {
         let admin_ref = match &cached_admin {
             Ok(cfg) => Some(cfg),
             Err(_) => None,
         };
-        let r = charge_one(env, id, now, None, admin_ref);
+        let r = charge_one(env, id, now, None, admin_ref, Some(&mut merchant_cache));
         let res = match r {
             Ok(ChargeExecutionResult::Charged) => BatchChargeResult {
                 success: true,
@@ -584,7 +596,7 @@ pub fn do_charge_subscription(
     let _admin = require_stored_admin_auth(env)?;
 
     let now = env.ledger().timestamp();
-    charge_one(env, subscription_id, now, None, None)
+    charge_one(env, subscription_id, now, None, None, None)
 }
 
 /// Performs a single usage-based charge. Admin only.
