@@ -2179,6 +2179,70 @@ fn test_batch_charge_partial_success() {
 }
 
 #[test]
+fn test_create_plan_template_rejects_below_minimum_interval() {
+    let test_env = TestEnv::default();
+    let merchant = Address::generate(&test_env.env);
+
+    let res = test_env
+        .client
+        .try_create_plan_template(&merchant, &AMOUNT, &59u64, &false, &None::<i128>);
+    assert_eq!(res, Err(Ok(Error::InvalidInput)));
+}
+
+#[test]
+fn test_update_plan_template_rejects_below_minimum_interval() {
+    let test_env = TestEnv::default();
+    let merchant = Address::generate(&test_env.env);
+
+    let plan_id =
+        test_env
+            .client
+            .create_plan_template(&merchant, &AMOUNT, &INTERVAL, &false, &None::<i128>);
+
+    let res = test_env.client.try_update_plan_template(
+        &merchant,
+        &plan_id,
+        &AMOUNT,
+        &0u64,
+        &false,
+        &None::<i128>,
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidInput)));
+}
+
+#[test]
+fn test_merchant_refund_reconciliation_snapshot_matches_stored_balance() {
+    let test_env = TestEnv::default();
+    test_env.env.ledger().set_timestamp(T0);
+
+    let (id1, _, merchant) =
+        fixtures::create_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    fixtures::seed_balance(&test_env.env, &test_env.client, id1, PREPAID);
+
+    test_env.env.ledger().set_timestamp(T0 + INTERVAL + 1);
+    let ids = Vec::from_array(&test_env.env, [id1]);
+    test_env.client.batch_charge(&ids, &0u64);
+
+    let subscriber = Address::generate(&test_env.env);
+    let refund_amount = AMOUNT / 2;
+    test_env
+        .client
+        .merchant_refund(&merchant, &subscriber, &test_env.token, &refund_amount);
+
+    let expected_balance = AMOUNT - refund_amount;
+    let stored = test_env
+        .client
+        .get_merchant_balance_by_token(&merchant, &test_env.token);
+    assert_eq!(stored, expected_balance);
+
+    let snapshot = test_env.client.get_reconciliation_snapshot(&merchant);
+    let entry = snapshot.get(0).unwrap();
+    assert_eq!(entry.stored_balance, stored);
+    assert_eq!(entry.computed_balance, stored);
+    assert!(entry.matches);
+}
+
+#[test]
 fn test_batch_charge_failed_items_match_single_path_without_cross_item_side_effects() {
     let test_env_batch = TestEnv::default();
     let test_env_single = TestEnv::default();
