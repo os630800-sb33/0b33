@@ -512,7 +512,7 @@ pub fn charge_one(
             let (merchant_amount, fee_amount) = if fee_bps > 0 {
                 if let Some(ref _t) = treasury_opt {
                     let fee = charge_amount * fee_bps as i128 / 10_000i128;
-                    let net = charge_amount - fee;
+                    let net = safe_sub(charge_amount, fee)?;
                     (net, fee)
                 } else {
                     (charge_amount, 0i128)
@@ -1154,7 +1154,8 @@ pub fn charge_usage_one(
             let (merchant_amount, fee_amount) = if fee_bps > 0 {
                 if let Some(ref _t) = treasury_opt {
                     let fee = usage_amount * fee_bps as i128 / 10_000i128;
-                    (usage_amount - fee, fee)
+                    let net = safe_sub(usage_amount, fee)?;
+                    (net, fee)
                 } else {
                     (usage_amount, 0i128)
                 }
