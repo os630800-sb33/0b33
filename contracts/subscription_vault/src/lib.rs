@@ -327,22 +327,18 @@ pub mod statements {
             .unwrap_or(Vec::new(env));
         let total = ids.len();
 
-        let mut ordered: Vec<u32> = Vec::new(env);
-        if newest_first {
-            let mut i = ids.len();
-            while i > 0 {
-                i -= 1;
-                ordered.push_back(ids.get(i).unwrap());
-            }
-        } else {
-            ordered = ids;
-        }
-
+        // Seek directly to the requested page offset instead of materialising a
+        // fully reordered copy of the index — indices are computed in place so
+        // only the `limit` entries for this page are ever read.
         let mut statements: Vec<BillingStatement> = Vec::new(env);
         let end = offset.saturating_add(limit).min(total);
         let mut i = offset;
         while i < end {
-            let seq = ordered.get(i).unwrap();
+            let seq = if newest_first {
+                ids.get(total - 1 - i).unwrap()
+            } else {
+                ids.get(i).unwrap()
+            };
             if let Some(stmt) = env
                 .storage()
                 .persistent()
@@ -371,11 +367,13 @@ pub mod statements {
         limit: u32,
         newest_first: bool,
     ) -> Result<BillingStatementsPage, Error> {
-        Ok(BillingStatementsPage {
-            statements: soroban_sdk::Vec::new(&env),
-            next_cursor: None,
-            total: 0,
-        })
+        get_statements_by_subscription_offset(
+            env,
+            subscription_id,
+            cursor.unwrap_or(0),
+            limit,
+            newest_first,
+        )
     }
 }
 

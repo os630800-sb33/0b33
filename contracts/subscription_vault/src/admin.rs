@@ -516,6 +516,9 @@ pub(crate) fn execute_batch_charge(
     // subscriptions sharing a merchant only hit storage once for it.
     let mut merchant_cache: soroban_sdk::Map<Address, (bool, bool)> = soroban_sdk::Map::new(env);
     let mut results = Vec::new(env);
+    // Cache oracle prices per (merchant, token) pair so subscriptions sharing a
+    // merchant and token within the batch don't redundantly re-query the oracle.
+    let mut price_cache: std::vec::Vec<(Address, Address, u128)> = std::vec::Vec::new();
     for id in subscription_ids.iter() {
         let admin_ref = match &cached_admin {
             Ok(cfg) => Some(cfg),

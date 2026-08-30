@@ -109,8 +109,10 @@ struct FeeConversion {
 /// - Conversion would round to zero (precision loss guard).
 fn convert_fee(
     env: &Env,
+    merchant: &Address,
     source_token: &Address,
     fee_amount: i128,
+    price_cache: Option<&mut Vec<(Address, Address, u128)>>,
 ) -> FeeConversion {
     let fee_token_opt = crate::admin::get_fee_token(env);
     let fee_token = match fee_token_opt {
@@ -133,8 +135,27 @@ fn convert_fee(
         };
     }
 
-    match dispatch_price(env, &oracle_config, source_token, &fee_token) {
+    // Reuse a previously-dispatched price for the same (merchant, token) pair
+    // within this batch so the oracle is not queried redundantly.
+    let cached = price_cache.as_ref().and_then(|cache| {
+        cache
+            .iter()
+            .find(|(m, t, _)| m == merchant && t == source_token)
+            .map(|(_, _, p)| *p)
+    });
+
+    let price_result = match cached {
+        Some(p) => Ok(p),
+        None => dispatch_price(env, &oracle_config, source_token, &fee_token),
+    };
+
+    match price_result {
         Ok(price) => {
+            if cached.is_none() {
+                if let Some(cache) = price_cache {
+                    cache.push((merchant.clone(), source_token.clone(), price));
+                }
+            }
             let converted = (fee_amount as u128)
                 .checked_mul(price)
                 .and_then(|v| v.checked_div(PRICE_SCALE))
@@ -574,7 +595,13 @@ pub fn charge_one(
             }
 
             let conversion = if fee_amount > 0 {
-                Some(convert_fee(env, &sub.token, fee_amount))
+                Some(convert_fee(
+                    env,
+                    &sub.merchant,
+                    &sub.token,
+                    fee_amount,
+                    price_cache.as_deref_mut(),
+                ))
             } else {
                 None
             };
@@ -1208,7 +1235,7 @@ pub fn charge_usage_one(
             }
 
             let conversion = if fee_amount > 0 {
-                Some(convert_fee(env, &sub.token, fee_amount))
+                Some(convert_fee(env, &sub.merchant, &sub.token, fee_amount, None))
             } else {
                 None
             };
