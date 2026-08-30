@@ -470,7 +470,7 @@ pub fn charge_one(
     if let Some(ref k) = idempotency_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_CHARGE_INTERVAL,
+            crate::nonce::DOMAIN_CHARGE_INTERVAL.as_u32(),
             subscription_id,
             k,
         );
@@ -729,7 +729,7 @@ pub fn charge_one(
             if let Some(k) = idempotency_key {
                 let hashed = crate::idempotency::hash_idem_key(
                     env,
-                    crate::nonce::DOMAIN_CHARGE_INTERVAL,
+                    crate::nonce::DOMAIN_CHARGE_INTERVAL.as_u32(),
                     subscription_id,
                     &k,
                 );
@@ -743,7 +743,7 @@ pub fn charge_one(
                     subscriber: sub.subscriber.clone(),
                     merchant: sub.merchant.clone(),
                     token: sub.token.clone(),
-                    amount: charge_amount,
+                    amount: merchant_amount,
                     lifetime_charged: sub.lifetime_charged,
                     timestamp: now,
                     period_start,

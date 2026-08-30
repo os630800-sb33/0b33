@@ -778,7 +778,10 @@ impl SubscriptionVault {
 
     /// Return the current (next-expected) nonce for a `(signer, domain)` pair.
     pub fn get_admin_nonce(env: Env, signer: Address, domain: u32) -> u64 {
-        nonce::get_nonce(&env, &signer, domain)
+        match nonce::NonceDomain::try_from(domain) {
+            Ok(domain) => nonce::get_nonce(&env, &signer, domain),
+            Err(_) => 0,
+        }
     }
 
     // ── Operator management ───────────────────────────────────────────────────
@@ -2377,38 +2380,12 @@ impl SubscriptionVault {
     ) -> Result<ChargeExecutionResult, Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "charge_subscription")?;
-        let old_sub = queries::get_subscription(&env, subscription_id)?;
         let timestamp = env.ledger().timestamp();
+        // `charge_core::charge_one` publishes the canonical `SubscriptionChargedEvent`
+        // (with the correct post-fee net merchant amount) on the success path —
+        // do not duplicate it here with a second, pre-fee-amount event.
         let result =
             charge_core::charge_one(&env, subscription_id, timestamp, idem_key, None, None)?;
-        let new_sub = queries::get_subscription(&env, subscription_id)?;
-
-        let _period_start = old_sub.last_payment_timestamp;
-        let _period_end = timestamp;
-
-        env.events().publish(
-            (types::TOPIC_CHARGED,),
-            SubscriptionChargedEvent {
-                subscription_id,
-                subscriber: old_sub.subscriber,
-                merchant: old_sub.merchant,
-                token: old_sub.token,
-                amount: old_sub.amount,
-                lifetime_charged: new_sub.lifetime_charged,
-                timestamp,
-                period_start: old_sub.last_payment_timestamp,
-                period_end: timestamp,
-                salt: {
-                    let mut salt_buf = [0u8; 20];
-                    salt_buf[..4].copy_from_slice(&subscription_id.to_be_bytes());
-                    salt_buf[4..12].copy_from_slice(&old_sub.last_payment_timestamp.to_be_bytes());
-                    salt_buf[12..20].copy_from_slice(&env.ledger().sequence().to_be_bytes());
-                    let salt_input = soroban_sdk::Bytes::from_slice(&env, &salt_buf);
-                    env.crypto().sha256(&salt_input).into()
-                },
-                schema_version: crate::types::EVENT_SCHEMA_VERSION,
-            },
-        );
         Ok(result)
     }
 

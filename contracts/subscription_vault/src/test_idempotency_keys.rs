@@ -452,7 +452,7 @@ fn test_idem_ttl_expires_old_entries() {
     let token_admin = token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&subscriber, &1_000_000_000i128);
 
-    let domain = crate::nonce::DOMAIN_DEPOSIT_FUNDS;
+    let domain = crate::nonce::DOMAIN_DEPOSIT_FUNDS.as_u32();
     let extra = 500_000i128;
 
     // Insert a key at t=0 (relative to setup baseline).

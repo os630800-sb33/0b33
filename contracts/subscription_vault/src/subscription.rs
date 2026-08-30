@@ -834,7 +834,7 @@ pub fn do_deposit_funds(
     if let Some(ref k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
+            crate::nonce::DOMAIN_DEPOSIT_FUNDS.as_u32(),
             subscription_id,
             k,
         );
@@ -917,7 +917,7 @@ pub fn do_deposit_funds(
     if let Some(k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
+            crate::nonce::DOMAIN_DEPOSIT_FUNDS.as_u32(),
             subscription_id,
             &k,
         );
@@ -1048,7 +1048,7 @@ pub fn do_grace_buyout(
             subscriber: sub.subscriber.clone(),
             merchant: sub.merchant.clone(),
             token: sub.token.clone(),
-            amount: charge_amount,
+            amount: merchant_credit,
             lifetime_charged: sub.lifetime_charged,
             timestamp: now,
             period_start: now.saturating_sub(sub.interval_seconds),
@@ -1083,7 +1083,7 @@ pub fn do_grace_buyout(
     if let Some(k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_CHARGE_INTERVAL,
+            crate::nonce::DOMAIN_CHARGE_INTERVAL.as_u32(),
             subscription_id,
             &k,
         );
@@ -2292,7 +2292,7 @@ pub fn do_charge_one_off(
     if let Some(ref k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_CHARGE_ONEOFF,
+            crate::nonce::DOMAIN_CHARGE_ONEOFF.as_u32(),
             subscription_id,
             k,
         );
@@ -2451,7 +2451,7 @@ pub fn do_charge_one_off(
     if let Some(k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_CHARGE_ONEOFF,
+            crate::nonce::DOMAIN_CHARGE_ONEOFF.as_u32(),
             subscription_id,
             &k,
         );
@@ -2921,7 +2921,7 @@ pub fn do_deposit_funds_on_behalf(
     if let Some(ref k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
+            crate::nonce::DOMAIN_DEPOSIT_FUNDS.as_u32(),
             subscription_id,
             k,
         );
@@ -3002,7 +3002,7 @@ pub fn do_deposit_funds_on_behalf(
     if let Some(k) = idem_key {
         let hashed = crate::idempotency::hash_idem_key(
             env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
+            crate::nonce::DOMAIN_DEPOSIT_FUNDS.as_u32(),
             subscription_id,
             &k,
         );

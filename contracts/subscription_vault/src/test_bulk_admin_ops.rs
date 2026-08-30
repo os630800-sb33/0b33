@@ -112,7 +112,7 @@ fn bulk_pause_empty_vec_emits_no_events_and_no_storage_writes() {
     );
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         0u64,
         "empty bulk_pause must not consume nonce"
     );
@@ -140,7 +140,7 @@ fn bulk_pause_id_zero_reports_not_found() {
     // Nonce was consumed (batch was non-empty).
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         1u64
     );
 }
@@ -164,7 +164,7 @@ fn empty_bulk_pause_is_a_noop_and_consumes_no_nonce() {
     // Nonce was NOT consumed — a real batch can still use nonce 0.
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         0u64
     );
 }
@@ -287,7 +287,7 @@ fn bulk_pause_rejects_oversized_batch() {
     // Oversized batch must not burn the nonce.
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         0u64
     );
 }
@@ -319,7 +319,7 @@ fn bulk_pause_advances_nonce() {
         .bulk_pause_subscriptions(&te.admin, &vec![&te.env, a], &0u64);
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         1u64
     );
 }
@@ -373,7 +373,7 @@ fn admin_and_operator_have_independent_nonce_sequences() {
 
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         1u64
     );
     assert_eq!(te.client.get_operator_nonce(&operator), 1u64);
@@ -452,7 +452,7 @@ fn bulk_cancel_empty_vec_emits_no_events_and_no_storage_writes() {
     );
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         0u64,
         "empty bulk_cancel must not consume nonce"
     );
@@ -478,7 +478,7 @@ fn bulk_cancel_id_zero_reports_not_found() {
 
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         1u64
     );
 }
@@ -582,7 +582,7 @@ fn empty_bulk_cancel_is_a_noop_and_consumes_no_nonce() {
 
     assert_eq!(
         te.client
-            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE),
+            .get_admin_nonce(&te.admin, &DOMAIN_OPERATOR_BATCH_CHARGE.as_u32()),
         0u64
     );
 }

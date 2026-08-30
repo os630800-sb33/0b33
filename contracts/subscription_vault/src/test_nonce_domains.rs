@@ -160,7 +160,7 @@ fn test_nonce_max_overflow_domain_isolation() {
 
     env.as_contract(&contract_id, || {
         let domain = DOMAIN_CHARGE_ONEOFF;
-        let key = DataKey::AdminNonce(signer.clone(), domain);
+        let key = DataKey::AdminNonce(signer.clone(), domain.as_u32());
 
         // Artificially seed storage with u64::MAX
         env.storage().persistent().set(&key, &u64::MAX);
