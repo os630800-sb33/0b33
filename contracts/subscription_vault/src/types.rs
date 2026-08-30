@@ -1806,6 +1806,19 @@ pub struct AdminConfigChangedEvent {
     pub schema_version: u32,
 }
 
+/// Emitted when the admin changes the protocol's `min_topup` threshold, so
+/// subscribers whose next deposit falls between the old and new thresholds
+/// can be notified before enforcement kicks in.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MinTopupUpdatedEvent {
+    pub admin: Address,
+    pub old_min_topup: i128,
+    pub new_min_topup: i128,
+    pub timestamp: u64,
+    pub schema_version: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecoveryReason {
@@ -2115,6 +2128,15 @@ pub struct GraceBuyoutEvent {
     pub deposit_amount: i128,
     pub charge_amount: i128,
     pub premium_paid: i128,
+    pub timestamp: u64,
+    pub schema_version: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SubscriptionPausedEvent {
+    pub subscription_id: u32,
+    pub paused_by: Address,
     pub timestamp: u64,
     pub schema_version: u32,
 }

@@ -163,12 +163,19 @@ fn convert_fee(
 }
 
 /// Performs a single interval-based charge with optional replay protection.
+///
+/// `merchant_cache` lets callers that charge many subscriptions in one call
+/// (e.g. `execute_batch_charge`) reuse the paused/vacation lookup for a
+/// merchant across every subscription that shares it, instead of re-reading
+/// `DataKey::MerchantPaused`/`DataKey::MerchantVacation` from storage on
+/// every iteration. Pass `None` for single-subscription charge paths.
 pub fn charge_one(
     env: &Env,
     subscription_id: u32,
     now: u64,
     idempotency_key: Option<soroban_sdk::BytesN<32>>,
     admin_config: Option<&crate::admin::CachedAdminConfig>,
+    mut merchant_cache: Option<&mut soroban_sdk::Map<Address, (bool, bool)>>,
 ) -> Result<ChargeExecutionResult, Error> {
     // ── CRITICAL: Atomic emergency stop check ────────────────────────────────
     // Re-check emergency stop on every iteration to prevent in-flight batch_charge
@@ -187,8 +194,29 @@ pub fn charge_one(
     let mut sub = get_subscription(env, subscription_id)
         .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
 
+    // Merchant pause/vacation status — cached per merchant within a batch so
+    // subscriptions sharing a merchant don't each re-read the same storage.
+    let (merchant_paused, merchant_in_vacation) = match merchant_cache.as_deref_mut() {
+        Some(cache) => {
+            if let Some(cached) = cache.get(sub.merchant.clone()) {
+                cached
+            } else {
+                let status = (
+                    crate::merchant::get_merchant_paused(env, sub.merchant.clone()),
+                    crate::merchant::is_merchant_in_vacation(env, &sub.merchant, now),
+                );
+                cache.set(sub.merchant.clone(), status);
+                status
+            }
+        }
+        None => (
+            crate::merchant::get_merchant_paused(env, sub.merchant.clone()),
+            crate::merchant::is_merchant_in_vacation(env, &sub.merchant, now),
+        ),
+    };
+
     // Merchant pause guard — mirrors charge_usage_one enforcement
-    if crate::merchant::get_merchant_paused(env, sub.merchant.clone()) {
+    if merchant_paused {
         return Err(charge_fail(
             env,
             subscription_id,
@@ -199,7 +227,7 @@ pub fn charge_one(
     }
 
     // Merchant vacation guard — block charges during vacation window
-    if crate::merchant::is_merchant_in_vacation(env, &sub.merchant, now) {
+    if merchant_in_vacation {
         return Err(charge_fail(
             env,
             subscription_id,
