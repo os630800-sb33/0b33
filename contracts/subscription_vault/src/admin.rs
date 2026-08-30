@@ -504,12 +504,15 @@ pub(crate) fn execute_batch_charge(
     // Read all admin config values once so they are cached across the batch loop.
     let cached_admin = read_cached_admin_config(env);
     let mut results = Vec::new(env);
+    // Cache oracle prices per (merchant, token) pair so subscriptions sharing a
+    // merchant and token within the batch don't redundantly re-query the oracle.
+    let mut price_cache: std::vec::Vec<(Address, Address, u128)> = std::vec::Vec::new();
     for id in subscription_ids.iter() {
         let admin_ref = match &cached_admin {
             Ok(cfg) => Some(cfg),
             Err(_) => None,
         };
-        let r = charge_one(env, id, now, None, admin_ref);
+        let r = charge_one(env, id, now, None, admin_ref, Some(&mut price_cache));
         let res = match r {
             Ok(ChargeExecutionResult::Charged) => BatchChargeResult {
                 success: true,
@@ -584,7 +587,7 @@ pub fn do_charge_subscription(
     let _admin = require_stored_admin_auth(env)?;
 
     let now = env.ledger().timestamp();
-    charge_one(env, subscription_id, now, None, None)
+    charge_one(env, subscription_id, now, None, None, None)
 }
 
 /// Performs a single usage-based charge. Admin only.
