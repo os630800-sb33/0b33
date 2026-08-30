@@ -1388,6 +1388,43 @@ fn test_deposit_funds_unauthorized() {
     assert_eq!(sub.prepaid_balance, 0);
 }
 
+/// Issue #58 / #029: deposit_funds on a Cancelled subscription must be
+/// rejected with InvalidStatusTransition and must not move tokens or
+/// credit prepaid_balance.
+#[test]
+fn test_deposit_funds_rejected_when_cancelled() {
+    let (env, client, token, _) = setup_test_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token)
+        .mint(&subscriber, &100_000_000);
+
+    let id = client.create_subscription(
+        &subscriber,
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &false,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+    );
+    client.deposit_funds(&id, &5_000_000, &None::<soroban_sdk::BytesN<32>>);
+    client.cancel_subscription(&id, &subscriber);
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    let wallet_before = token_client.balance(&subscriber);
+    let prepaid_before = client.get_subscription(&id).prepaid_balance;
+
+    let result = client.try_deposit_funds(&id, &5_000_000, &None::<soroban_sdk::BytesN<32>>);
+    assert_eq!(result, Err(Ok(Error::InvalidStatusTransition)));
+
+    let sub = client.get_subscription(&id);
+    assert_eq!(sub.status, SubscriptionStatus::Cancelled);
+    assert_eq!(sub.prepaid_balance, prepaid_before);
+    assert_eq!(token_client.balance(&subscriber), wallet_before);
+}
+
 #[test]
 fn test_deposit_funds_event_payload() {
     let (env, client, token, _) = setup_test_env();
