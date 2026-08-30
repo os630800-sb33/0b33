@@ -51,13 +51,6 @@ pub const BILLING_PERIOD_SNAPSHOT_TTL_THRESHOLD: u32 = 30 * 24 * 60 * 60; // 30 
 /// Target TTL for billing period snapshot entries when extended.
 pub const BILLING_PERIOD_SNAPSHOT_TTL_EXTEND_TO: u32 = 365 * 24 * 60 * 60; // 365 days
 
-/// Replay protection domain for charge_subscription.
-pub const DOMAIN_CHARGE_INTERVAL: u32 = 0;
-/// Replay protection domain for deposit_funds.
-pub const DOMAIN_DEPOSIT_FUNDS: u32 = 1;
-/// Replay protection domain for charge_one_off.
-pub const DOMAIN_CHARGE_ONEOFF: u32 = 2;
-
 /// Number of idempotency slots retained per subscription.
 ///
 /// Must stay in sync with `idempotency::IDEM_HISTORY`.

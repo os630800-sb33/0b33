@@ -138,12 +138,28 @@ pub const MAX_SCAN_DEPTH: u32 = 1_000;
 
 pub fn get_subscription(env: &Env, subscription_id: u32) -> Result<Subscription, Error> {
     let key = DataKey::Sub(subscription_id);
-    let sub = env
+    let mut sub: Subscription = env
         .storage()
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
     extend_subscription_ttl(env, &key);
+
+    // `GracePeriod` is persisted, but the transition out of it only happens on
+    // the next charge attempt. If the grace window has already elapsed with no
+    // charge attempted yet, the stored status is stale — report the effective
+    // status (`InsufficientBalance`) instead of a `GracePeriod` that has
+    // functionally already expired.
+    if sub.status == SubscriptionStatus::GracePeriod {
+        if let Some(grace_start) = sub.grace_start_timestamp {
+            let grace_duration = crate::admin::get_grace_period(env).unwrap_or(0);
+            let grace_expires = grace_start.saturating_add(grace_duration);
+            if grace_duration == 0 || env.ledger().timestamp() >= grace_expires {
+                sub.status = SubscriptionStatus::InsufficientBalance;
+            }
+        }
+    }
+
     Ok(sub)
 }
 

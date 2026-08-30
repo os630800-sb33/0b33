@@ -20,6 +20,16 @@ use soroban_sdk::{Address, Env, Map, String, Symbol, Vec};
 #[allow(dead_code)]
 const DOMAIN_GOVERNANCE: u32 = 3;
 
+/// Floor on the effective quorum required to execute any proposal, regardless
+/// of the per-proposal `quorum_bps` supplied at submission time.
+///
+/// `quorum_bps` is caller-supplied in [`do_submit_proposal`] and only bounded
+/// above (`<= 10_000`). Without a floor, a proposal could be submitted with
+/// `quorum_bps = 0`, making `required_votes` in [`do_execute_proposal`] zero
+/// and allowing execution of privileged actions (admin rotation, fee changes)
+/// with no real guardian consensus.
+pub const MIN_QUORUM_BPS: u32 = 5_000; // 50%
+
 /// Add or update a guardian's voting weight.
 ///
 /// # Errors
@@ -212,12 +222,14 @@ pub fn do_execute_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
         return Err(Error::InvalidInput);
     }
 
-    // Calculate quorum
+    // Calculate quorum. The effective quorum is never below `MIN_QUORUM_BPS`,
+    // even if the proposal was submitted with a lower `quorum_bps`.
     let (votes_for, votes_against) = calculate_quorum(env, &proposal);
     let total_weight = calculate_total_weight(env);
+    let effective_quorum_bps = proposal.quorum_bps.max(MIN_QUORUM_BPS);
 
     let required_votes = (total_weight as u128)
-        .checked_mul(proposal.quorum_bps as u128)
+        .checked_mul(effective_quorum_bps as u128)
         .and_then(|v| v.checked_div(10_000))
         .ok_or(Error::Overflow)? as u32;
 
