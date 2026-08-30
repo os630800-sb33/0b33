@@ -44,8 +44,14 @@ pub fn get_merchant_paused(env: &Env, merchant: Address) -> bool {
             return true;
         }
     }
-    let key = DataKey::MerchantPaused(merchant);
-    env.storage().instance().get(&key).unwrap_or(false)
+    // Once the contract has migrated to schema v3, all merchants have been
+    // migrated onto MerchantConfig, so the legacy key is never written to
+    // and reading it on every call is unnecessary storage access.
+    if crate::admin::get_schema_version(env) < 3 {
+        let key = DataKey::MerchantPaused(merchant);
+        return env.storage().instance().get(&key).unwrap_or(false);
+    }
+    false
 }
 
 pub fn set_merchant_paused(env: &Env, merchant: Address, paused: bool) {
