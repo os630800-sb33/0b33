@@ -62,7 +62,7 @@
 //! concurrency or subscriber credit limits.
 
 use crate::queries::get_subscription;
-use crate::safe_math::{safe_add, safe_add_balance, safe_sub};
+use crate::safe_math::{safe_add, safe_add_balance, safe_sub, safe_sub_balance};
 use crate::state_machine::transition_to;
 use crate::statements::append_statement;
 use crate::types::{
@@ -705,6 +705,16 @@ pub fn do_create_subscription_with_token(
     token_ids.push_back(id);
     env.storage().instance().set(&token_key, &token_ids);
 
+    // Maintain subscriber -> subscription-ID index
+    let subscriber_key = DataKey::SubscriberSubs(subscriber.clone());
+    let mut subscriber_ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&subscriber_key)
+        .unwrap_or(Vec::new(env));
+    subscriber_ids.push_back(id);
+    env.storage().instance().set(&subscriber_key, &subscriber_ids);
+
     env.events().publish(
         (Symbol::new(env, "subscription_created"), id),
         SubscriptionCreatedEvent {
@@ -777,6 +787,10 @@ pub fn do_deposit_funds(
     crate::blocklist::require_not_blocklisted(env, &subscriber)?;
 
     // CHECKS: Validate all preconditions before any state mutations
+    if sub.status == SubscriptionStatus::Cancelled {
+        return Err(Error::InvalidStatusTransition);
+    }
+
     let min_topup: i128 = crate::admin::get_min_topup(env)?;
     if amount < 0 {
         return Err(Error::InvalidAmount);
@@ -907,7 +921,7 @@ pub fn do_deposit_funds(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, env.ledger().timestamp());
     }
 
     Ok(())
@@ -970,10 +984,7 @@ pub fn do_grace_buyout(
         .checked_add(amount)
         .ok_or(Error::Overflow)?;
 
-    let new_balance = sub
-        .prepaid_balance
-        .checked_sub(charge_amount)
-        .ok_or(Error::InsufficientBalance)?;
+    let new_balance = safe_sub_balance(sub.prepaid_balance, charge_amount)?;
     sub.prepaid_balance = new_balance;
 
     let now = env.ledger().timestamp();
@@ -1076,7 +1087,7 @@ pub fn do_grace_buyout(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, now);
     }
 
     Ok((charge_amount, premium))
@@ -1156,6 +1167,7 @@ fn apply_cancellation(
     if was_active {
         decrement_subscriber_active_count(env, &sub.subscriber);
     }
+    let original_prepaid_balance = sub.prepaid_balance;
     let refund_amount = compute_cancel_refund(sub.prepaid_balance);
 
     // EFFECTS: zero balance before escrow (CEI pattern).
@@ -1178,6 +1190,14 @@ fn apply_cancellation(
             merchant: sub.merchant.clone(),
             released_at,
         };
+
+        // Storage corruption or a missed accounting path would let escrow
+        // funds drift from the balance being released — trap instead of
+        // silently persisting a mismatched escrow record.
+        assert_eq!(
+            escrow.amount, original_prepaid_balance,
+            "cancellation escrow amount must equal prepaid_balance at cancellation time"
+        );
 
         env.storage()
             .persistent()
@@ -1451,6 +1471,91 @@ pub fn do_unschedule_cancel(
     Ok(())
 }
 
+/// Toggle auto-renewal for a subscription.
+///
+/// When `enabled = false` the billing engine will **skip** interval charges
+/// once the interval has elapsed — halting billing at the next natural boundary.
+/// During the *renewal window* (one full interval after the flag was disabled)
+/// the subscriber or merchant may call `set_auto_renew(true)` to re-enable
+/// billing without re-creating the subscription, preserving all history and
+/// metadata. After the window closes the subscription must be cancelled and
+/// re-created to resume billing.
+///
+/// # Authorization
+/// Only the subscription's `subscriber` or `merchant` may toggle.
+/// Any other caller receives [`Error::Forbidden`].
+///
+/// # Guard
+/// Cancelled and expired subscriptions are rejected.
+///
+/// # Events
+/// Emits [`AutoRenewToggledEvent`] on every call (including re-enabling within
+/// the renewal window).
+pub fn do_set_auto_renew(
+    env: &Env,
+    subscription_id: u32,
+    authorizer: Address,
+    enabled: bool,
+) -> Result<(), Error> {
+    authorizer.require_auth();
+
+    let mut sub = get_subscription(env, subscription_id)?;
+
+    let now = env.ledger().timestamp();
+
+    // Reject on terminal states.
+    if sub.status == SubscriptionStatus::Cancelled {
+        return Err(Error::InvalidStatusTransition);
+    }
+    if sub.is_expired(now, env.ledger().sequence()) {
+        return Err(Error::SubscriptionExpired);
+    }
+
+    // Only the subscriber or merchant may change the flag.
+    if authorizer != sub.subscriber && authorizer != sub.merchant {
+        return Err(Error::Forbidden);
+    }
+
+    // When re-enabling after a disable, enforce the renewal window.
+    if enabled {
+        if !sub.auto_renew {
+            // If the renewal window has closed, the subscription cannot be
+            // silently re-activated — it must be cancelled and re-created.
+            if !sub.is_in_renewal_window(now) {
+                return Err(Error::RenewalWindowClosed);
+            }
+            // Clear the disabled timestamp on successful re-enable.
+            sub.auto_renew_disabled_at = None;
+        }
+        // If already enabled, this is a no-op (idempotent).
+    } else {
+        // Disabling for the first time (or after a previous re-enable).
+        if sub.auto_renew {
+            sub.auto_renew_disabled_at = Some(now);
+        }
+        // If already disabled, the disable timestamp is preserved — the
+        // window continues to count from the *first* disable.
+    }
+
+    sub.auto_renew = enabled;
+    write_subscription(env, subscription_id, &sub);
+
+    env.events().publish(
+        (Symbol::new(env, "auto_renew_toggled"), subscription_id),
+        crate::types::AutoRenewToggledEvent {
+            subscription_id,
+            subscriber: sub.subscriber.clone(),
+            merchant: sub.merchant.clone(),
+            enabled,
+            authorizer,
+            timestamp: now,
+            schema_version: crate::types::EVENT_SCHEMA_VERSION,
+        },
+    );
+
+    Ok(())
+}
+
 /// Pause a subscription (no charges until resumed).
 ///
 /// # Authorization
@@ -1526,7 +1631,7 @@ fn apply_pause(
         (Symbol::new(env, "sub_paused"), subscription_id),
         crate::types::SubscriptionPausedEvent {
             subscription_id,
-            authorizer,
+            paused_by: authorizer,
             timestamp: env.ledger().timestamp(),
             schema_version: crate::types::EVENT_SCHEMA_VERSION,
         },
@@ -2260,7 +2365,8 @@ pub fn do_charge_one_off(
     let (merchant_amount, fee_amount) = if fee_bps > 0 {
         if let Some(ref _t) = treasury_opt {
             let fee = amount * fee_bps as i128 / 10_000i128;
-            (amount - fee, fee)
+            let net = safe_sub(amount, fee)?;
+            (net, fee)
         } else {
             (amount, 0i128)
         }
@@ -2349,7 +2455,7 @@ pub fn do_charge_one_off(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, now);
     }
 
     Ok(())
@@ -2900,7 +3006,7 @@ pub fn do_deposit_funds_on_behalf(
             subscription_id,
             &k,
         );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
+        crate::idempotency::push_key(env, subscription_id, &hashed, now);
     }
 
     Ok(())
@@ -3343,6 +3449,16 @@ pub fn do_create_subscription_from_plan(
         .unwrap_or(Vec::new(env));
     token_ids.push_back(id);
     env.storage().instance().set(&token_key, &token_ids);
+
+    // Maintain subscriber -> subscription-ID index
+    let subscriber_key = DataKey::SubscriberSubs(subscriber.clone());
+    let mut subscriber_ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&subscriber_key)
+        .unwrap_or(Vec::new(env));
+    subscriber_ids.push_back(id);
+    env.storage().instance().set(&subscriber_key, &subscriber_ids);
 
     env.events().publish(
         (TOPIC_CREATED, id),

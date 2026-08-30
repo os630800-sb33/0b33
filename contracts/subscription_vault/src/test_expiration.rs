@@ -292,6 +292,31 @@ fn test_reject_expiration_in_the_past() {
     assert_eq!(res, Err(Ok(Error::InvalidExpiration)));
 }
 
+/// Reject the default-token `create_subscription` entry point (not just
+/// `create_subscription_with_token`) when `expires_at` is already in the past.
+#[test]
+fn test_create_subscription_default_token_rejects_past_expiration() {
+    let (env, client, _token_client, _token_admin, _) = setup_test_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+
+    let expires_at = T0 - 1; // one second before current ledger time
+
+    let res = client.try_create_subscription(
+        &subscriber,
+        &merchant,
+        &1_000_000i128,
+        &INTERVAL,
+        &false,
+        &None::<i128>,
+        &Some(expires_at),
+        &None::<u32>,
+        &None::<Symbol>,
+        &false,
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidExpiration)));
+}
+
 /// `None` expiration must be accepted.
 ///
 /// Omitting `expires_at` creates an open-ended subscription that never

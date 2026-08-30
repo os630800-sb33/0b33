@@ -49,6 +49,8 @@ pub mod queries;
 mod reentrancy;
 mod safe_math;
 mod subscription;
+#[cfg(test)]
+mod test_datakey_layout;
 mod types;
 mod validation;
 
@@ -955,6 +957,13 @@ impl SubscriptionVault {
     }
 
     /// Charge a batch of subscriptions in one transaction. Admin only.
+    ///
+    /// Subscriptions are charged sequentially and **the batch is not atomic**:
+    /// each charge that succeeds is committed immediately, so if a later id in
+    /// the same batch fails, the earlier successful charges are *not* rolled
+    /// back. The returned `Vec<BatchChargeResult>` is in request order and
+    /// reports, per id, whether it succeeded and (on failure) the error code,
+    /// so callers can determine exactly which ids were actually charged.
     pub fn batch_charge(
         env: Env,
         subscription_ids: Vec<u32>,
@@ -2193,7 +2202,7 @@ impl SubscriptionVault {
             (Symbol::new(&env, "sub_paused"), subscription_id),
             SubscriptionPausedEvent {
                 subscription_id,
-                authorizer,
+                paused_by: authorizer,
                 timestamp,
                 schema_version: crate::types::EVENT_SCHEMA_VERSION,
             },
@@ -2370,7 +2379,8 @@ impl SubscriptionVault {
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "charge_subscription")?;
         let old_sub = queries::get_subscription(&env, subscription_id)?;
         let timestamp = env.ledger().timestamp();
-        let result = charge_core::charge_one(&env, subscription_id, timestamp, idem_key, None, None)?;
+        let result =
+            charge_core::charge_one(&env, subscription_id, timestamp, idem_key, None, None)?;
         let new_sub = queries::get_subscription(&env, subscription_id)?;
 
         let _period_start = old_sub.last_payment_timestamp;

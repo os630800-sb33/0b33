@@ -24,7 +24,8 @@
 //!   inserted via `deposit_funds` is *not* replayable via `charge_subscription`
 //!   because the two entrypoints use different domain constants.
 //! * The ring evicts the oldest entry when full, so replay protection is
-//!   bounded to the most-recent `IDEM_HISTORY` keys per subscription.
+//!   bounded to the most-recent `IDEM_HISTORY` keys per subscription within
+//!   the `IDEM_TTL_SECS` time window.
 //! * CPU-cost assertions use a percentage tolerance rather than an absolute
 //!   instruction count so that the test remains stable across SDK upgrades.
 
@@ -38,8 +39,8 @@ use subscription_vault::{SubscriptionVault, SubscriptionVaultClient};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Number of idempotency slots in the ring (must match types::IDEM_HISTORY = 32).
-const RING_SIZE: usize = 32;
+/// Number of idempotency slots in the ring (must match types::IDEM_HISTORY = 64).
+const RING_SIZE: usize = 64;
 
 /// Allowed spread between the cheapest and most-expensive hit position,
 /// expressed as a percentage of the cheapest cost.  We allow 20 % to

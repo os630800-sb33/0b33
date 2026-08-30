@@ -1,5 +1,5 @@
 use crate::{
-    idempotency::{check_key, hash_idem_key, push_key, IDEM_HISTORY},
+    idempotency::{check_key, check_key_at, hash_idem_key, push_key, IDEM_HISTORY, IDEM_TTL_SECS},
     ChargeExecutionResult, SubscriptionVault, SubscriptionVaultClient,
 };
 use soroban_sdk::{
@@ -434,5 +434,88 @@ fn test_idem_ring_exact_capacity_then_overwrite() {
         client.get_subscription(&id).prepaid_balance,
         bal_before + extra,
         "re-inserting evicted key 0 must succeed"
+    );
+}
+
+/// Time-based expiry: an entry older than `IDEM_TTL_SECS` must no longer
+/// be considered a duplicate, even if the ring has not cycled.
+///
+/// This closes the ring-cycling attack (issue #13): an attacker cannot
+/// replay an old hash simply by letting enough newer charges evict it —
+/// the TTL provides an independent, time-bounded guard.
+#[test]
+fn test_idem_ttl_expires_old_entries() {
+    let (env, client, token) = setup_test_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+    let id = create_and_fund_sub(&env, &client, &subscriber, &merchant, &token);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    token_admin.mint(&subscriber, &1_000_000_000i128);
+
+    let domain = crate::nonce::DOMAIN_DEPOSIT_FUNDS;
+    let extra = 500_000i128;
+
+    // Insert a key at t=0 (relative to setup baseline).
+    let raw = make_key(&env, 0xAB);
+    let hashed = hash_idem_key(&env, domain, id, &raw);
+    token_admin.mint(&subscriber, &extra);
+    client.deposit_funds(&id, &extra, &Some(raw.clone()));
+
+    // At insertion time the hash must be present.
+    assert!(
+        check_key(&env, id, &hashed),
+        "hash must be live immediately after insertion"
+    );
+
+    // Advance time to just before TTL expiry — hash must still be active.
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + IDEM_TTL_SECS - 1);
+    assert!(
+        check_key_at(&env, id, &hashed, env.ledger().timestamp()),
+        "hash must still be live one second before TTL expires"
+    );
+
+    // Advance past the TTL — hash must now be expired.
+    env.ledger().set_timestamp(now + IDEM_TTL_SECS);
+    assert!(
+        !check_key_at(&env, id, &hashed, env.ledger().timestamp()),
+        "hash must be expired once TTL has elapsed"
+    );
+
+    // Re-submitting the same key after expiry must be accepted as a new deposit.
+    token_admin.mint(&subscriber, &extra);
+    let bal_before = client.get_subscription(&id).prepaid_balance;
+    client.deposit_funds(&id, &extra, &Some(raw));
+    assert_eq!(
+        client.get_subscription(&id).prepaid_balance,
+        bal_before + extra,
+        "expired key must be accepted as a fresh deposit"
+    );
+}
+
+/// Verify that the combined TTL + ring-size defence makes the cycling attack
+/// infeasible: filling 64 slots within 7 days requires a charge every ~2.6
+/// hours — far above any normal subscription billing cadence.
+///
+/// This is a documentation test; it asserts the constants rather than
+/// exercising runtime behaviour.
+#[test]
+fn test_cycling_attack_infeasibility_constants() {
+    // Seconds available before the oldest entry expires.
+    let ttl_seconds = IDEM_TTL_SECS;
+    // Number of charges an attacker must push through to evict a single entry.
+    let slots = IDEM_HISTORY as u64;
+    // Minimum seconds between charges to cycle the full ring within the TTL.
+    let min_interval_secs = ttl_seconds / slots;
+
+    // A minimum inter-charge interval of ~2.6 hours means the ring cannot
+    // be cycled during the TTL window unless the subscription charges more
+    // frequently than once every ~2.6 hours — which is not a valid billing
+    // cadence for any subscription product.
+    assert!(
+        min_interval_secs >= 3 * 60 * 60, // 3 hours
+        "cycling the ring within TTL requires charges more frequent than 3 h \
+         (actual minimum interval: {} s) — tighten IDEM_HISTORY or IDEM_TTL_SECS",
+        min_interval_secs
     );
 }

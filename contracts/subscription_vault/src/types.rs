@@ -58,8 +58,10 @@ pub const DOMAIN_DEPOSIT_FUNDS: u32 = 1;
 /// Replay protection domain for charge_one_off.
 pub const DOMAIN_CHARGE_ONEOFF: u32 = 2;
 
-/// Number of idempotent hashes to store per subscription.
-pub const IDEM_HISTORY: u32 = 32;
+/// Number of idempotency slots retained per subscription.
+///
+/// Must stay in sync with `idempotency::IDEM_HISTORY`.
+pub const IDEM_HISTORY: u32 = 64;
 
 /// Maximum fee in basis points (100.00%).
 pub const MAX_FEE_BIPS: i32 = 10000;
@@ -74,10 +76,13 @@ pub const MAX_FEE_BIPS: i32 = 10000;
 pub const MAX_PROTOCOL_FEE_BIPS: u32 = 500;
 
 /// Ring buffer for subscription-scoped idempotency hashes.
+///
+/// Each entry is `(hash, inserted_at_timestamp)`.  Entries older than
+/// `idempotency::IDEM_TTL_SECS` are treated as expired on lookup.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct IdemRingBuffer {
-    pub entries: Vec<BytesN<32>>,
+    pub entries: Vec<(BytesN<32>, u64)>,
     pub cursor: u32,
 }
 
@@ -1801,6 +1806,19 @@ pub struct AdminConfigChangedEvent {
     pub schema_version: u32,
 }
 
+/// Emitted when the admin changes the protocol's `min_topup` threshold, so
+/// subscribers whose next deposit falls between the old and new thresholds
+/// can be notified before enforcement kicks in.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MinTopupUpdatedEvent {
+    pub admin: Address,
+    pub old_min_topup: i128,
+    pub new_min_topup: i128,
+    pub timestamp: u64,
+    pub schema_version: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecoveryReason {
@@ -2110,6 +2128,15 @@ pub struct GraceBuyoutEvent {
     pub deposit_amount: i128,
     pub charge_amount: i128,
     pub premium_paid: i128,
+    pub timestamp: u64,
+    pub schema_version: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SubscriptionPausedEvent {
+    pub subscription_id: u32,
+    pub paused_by: Address,
     pub timestamp: u64,
     pub schema_version: u32,
 }

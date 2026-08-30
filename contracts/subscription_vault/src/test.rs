@@ -1388,6 +1388,43 @@ fn test_deposit_funds_unauthorized() {
     assert_eq!(sub.prepaid_balance, 0);
 }
 
+/// Issue #58 / #029: deposit_funds on a Cancelled subscription must be
+/// rejected with InvalidStatusTransition and must not move tokens or
+/// credit prepaid_balance.
+#[test]
+fn test_deposit_funds_rejected_when_cancelled() {
+    let (env, client, token, _) = setup_test_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token)
+        .mint(&subscriber, &100_000_000);
+
+    let id = client.create_subscription(
+        &subscriber,
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &false,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+    );
+    client.deposit_funds(&id, &5_000_000, &None::<soroban_sdk::BytesN<32>>);
+    client.cancel_subscription(&id, &subscriber);
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    let wallet_before = token_client.balance(&subscriber);
+    let prepaid_before = client.get_subscription(&id).prepaid_balance;
+
+    let result = client.try_deposit_funds(&id, &5_000_000, &None::<soroban_sdk::BytesN<32>>);
+    assert_eq!(result, Err(Ok(Error::InvalidStatusTransition)));
+
+    let sub = client.get_subscription(&id);
+    assert_eq!(sub.status, SubscriptionStatus::Cancelled);
+    assert_eq!(sub.prepaid_balance, prepaid_before);
+    assert_eq!(token_client.balance(&subscriber), wallet_before);
+}
+
 #[test]
 fn test_deposit_funds_event_payload() {
     let (env, client, token, _) = setup_test_env();
@@ -2176,6 +2213,70 @@ fn test_batch_charge_partial_success() {
 
     assertions::assert_prepaid_balance(&test_env.client, &id1, PREPAID - AMOUNT);
     assertions::assert_prepaid_balance(&test_env.client, &id2, 0);
+}
+
+#[test]
+fn test_create_plan_template_rejects_below_minimum_interval() {
+    let test_env = TestEnv::default();
+    let merchant = Address::generate(&test_env.env);
+
+    let res = test_env
+        .client
+        .try_create_plan_template(&merchant, &AMOUNT, &59u64, &false, &None::<i128>);
+    assert_eq!(res, Err(Ok(Error::InvalidInput)));
+}
+
+#[test]
+fn test_update_plan_template_rejects_below_minimum_interval() {
+    let test_env = TestEnv::default();
+    let merchant = Address::generate(&test_env.env);
+
+    let plan_id =
+        test_env
+            .client
+            .create_plan_template(&merchant, &AMOUNT, &INTERVAL, &false, &None::<i128>);
+
+    let res = test_env.client.try_update_plan_template(
+        &merchant,
+        &plan_id,
+        &AMOUNT,
+        &0u64,
+        &false,
+        &None::<i128>,
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidInput)));
+}
+
+#[test]
+fn test_merchant_refund_reconciliation_snapshot_matches_stored_balance() {
+    let test_env = TestEnv::default();
+    test_env.env.ledger().set_timestamp(T0);
+
+    let (id1, _, merchant) =
+        fixtures::create_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+    fixtures::seed_balance(&test_env.env, &test_env.client, id1, PREPAID);
+
+    test_env.env.ledger().set_timestamp(T0 + INTERVAL + 1);
+    let ids = Vec::from_array(&test_env.env, [id1]);
+    test_env.client.batch_charge(&ids, &0u64);
+
+    let subscriber = Address::generate(&test_env.env);
+    let refund_amount = AMOUNT / 2;
+    test_env
+        .client
+        .merchant_refund(&merchant, &subscriber, &test_env.token, &refund_amount);
+
+    let expected_balance = AMOUNT - refund_amount;
+    let stored = test_env
+        .client
+        .get_merchant_balance_by_token(&merchant, &test_env.token);
+    assert_eq!(stored, expected_balance);
+
+    let snapshot = test_env.client.get_reconciliation_snapshot(&merchant);
+    let entry = snapshot.get(0).unwrap();
+    assert_eq!(entry.stored_balance, stored);
+    assert_eq!(entry.computed_balance, stored);
+    assert!(entry.matches);
 }
 
 #[test]

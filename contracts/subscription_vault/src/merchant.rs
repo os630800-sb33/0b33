@@ -734,14 +734,16 @@ pub fn get_reconciliation_snapshot(
             .checked_sub(earnings.refunds)
             .unwrap_or(0);
 
+        let stored_balance = get_merchant_balance_by_token(env, merchant, &token);
+
         result.push_back(TokenReconciliationSnapshot {
             token: token.clone(),
             total_accruals,
             total_withdrawals: earnings.withdrawals,
             total_refunds: earnings.refunds,
             computed_balance,
-            stored_balance: 0,              // Will be computed by caller
-            matches: computed_balance == 0, // Placeholder
+            stored_balance,
+            matches: computed_balance == stored_balance,
         });
     }
     result
