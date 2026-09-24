@@ -134,6 +134,7 @@ REMEDIATION: dict[str, tuple[str, str, bool]] = {
     "CannotChangeUsageMode":          ("Cannot toggle usage_enabled on an existing subscription; create a new one.", "—", False),
     # Schema migration
     "SchemaMigrationDowngrade":       ("Downgrade rejected; deploy the correct binary version.", "SchemaMigratedEvent", False),
+    "SchemaVersionMismatch":          ("Migration rejected; deploy compatible binary.", "—", False),
     # Dispute / Chargeback
     "DisputeNotFound":                ("Verify dispute ID before retrying.", "—", False),
     "DisputeAlreadyResolved":         ("Inspect existing resolution; do not retry.", "DisputeResolvedEvent", False),

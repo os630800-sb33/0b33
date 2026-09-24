@@ -2,6 +2,11 @@
 //!
 //! Includes a deviation circuit breaker that rejects price spikes exceeding a
 //! configurable basis-point threshold relative to the median of recent samples.
+//!
+//! Staleness is controlled at runtime by `OracleConfig.max_age_seconds`
+//! (`set_oracle_config`), not by a compile-time `MAX_ORACLE_AGE`. The threshold
+//! is vault-global by design; see `docs/oracle_pricing.md` ("Per-merchant
+//! staleness threshold") for the rationale and future override sketch.
 
 use crate::safe_math::{safe_add, safe_div, safe_mul, safe_pow, safe_sub};
 use crate::types::{

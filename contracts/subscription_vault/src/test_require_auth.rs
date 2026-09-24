@@ -11,13 +11,19 @@
 //! | `pause_subscription`     | subscriber/merchant| `Error(Auth, InvalidAction)`    | `Error::Forbidden` 1002    |
 //! | `withdraw_merchant_funds`| merchant           | `Error(Auth, InvalidAction)`    | `Error::NotFound` 2001     |
 //! | `set_min_topup`          | stored admin       | `Error(Auth, InvalidAction)`    | `Error::Unauthorized` 1001 |
+//! | `operator_charge_usage`  | stored operator    | `Error::Unauthorized` 1001      | `Error::Unauthorized` 1001 |
 //!
-//! Each entrypoint has three test cases:
+//! Each entrypoint has up to three test cases:
 //!  1. **missing_auth** — no `mock_all_auths`, host panics at the first
 //!     `require_auth()` call with `Error(Auth, InvalidAction)`.
 //!  2. **wrong_signer** — `mock_all_auths` satisfies `require_auth()`, but the
 //!     contract's own ownership check returns the error shown above.
 //!  3. **correct_auth** — `mock_all_auths` + correct address → call succeeds.
+//!
+//! For stored-operator entrypoints like `operator_charge_usage`, when no operator
+//! is set or the wrong operator is provided, the contract returns `Unauthorized`
+//! rather than a host auth failure (since the call is already authorized but the
+//! stored value check fails).
 
 use crate::{DataKey, Error, SubscriptionStatus, SubscriptionVault, SubscriptionVaultClient};
 use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
@@ -163,6 +169,7 @@ fn deposit_funds_correct_auth() {
     client.deposit_funds(&id, &subscriber, &DEPOSIT, &None);
     let sub = client.get_subscription(&id);
     assert_eq!(sub.prepaid_balance, DEPOSIT);
+    assert_ne!(attacker, subscriber);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
