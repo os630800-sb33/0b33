@@ -558,9 +558,15 @@ pub fn charge_one(
             // exactly in the charge token and prevents 1-unit dust from remaining
             // in the vault. Converted fees (fee-token overrides) are handled
             // separately and do not affect the source-token accounting invariant.
+            //
+            // Minimum-fee floor: if fee_bps > 0 and a treasury is configured but
+            // the integer division rounds to 0 (charge_amount < 10_000 / fee_bps),
+            // we enforce a minimum fee of 1 base unit. This prevents fee evasion
+            // via very small charge amounts. The floor is only applied when there
+            // is an active treasury; if no treasury is set the fee is always 0.
             let (merchant_amount, fee_amount) = if fee_bps > 0 {
                 if let Some(ref _t) = treasury_opt {
-                    let fee = charge_amount * fee_bps as i128 / 10_000i128;
+                    let fee = (charge_amount * fee_bps as i128 / 10_000i128).max(1);
                     let net = safe_sub(charge_amount, fee)?;
                     (net, fee)
                 } else {
@@ -1208,7 +1214,8 @@ pub fn charge_usage_one(
             let treasury_opt = crate::admin::get_treasury(env);
             let (merchant_amount, fee_amount) = if fee_bps > 0 {
                 if let Some(ref _t) = treasury_opt {
-                    let fee = usage_amount * fee_bps as i128 / 10_000i128;
+                    // Minimum-fee floor: see charge_one for rationale.
+                    let fee = (usage_amount * fee_bps as i128 / 10_000i128).max(1);
                     let net = safe_sub(usage_amount, fee)?;
                     (net, fee)
                 } else {

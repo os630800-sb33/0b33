@@ -2367,7 +2367,10 @@ pub fn do_charge_one_off(
     let treasury_opt = crate::admin::get_treasury(env);
     let (merchant_amount, fee_amount) = if fee_bps > 0 {
         if let Some(ref _t) = treasury_opt {
-            let fee = amount * fee_bps as i128 / 10_000i128;
+            // Minimum-fee floor: if fee_bps > 0 and the integer division rounds
+            // to 0 (amount < 10_000 / fee_bps), enforce a floor of 1 base unit
+            // to prevent fee evasion via very small one-off charge amounts.
+            let fee = (amount * fee_bps as i128 / 10_000i128).max(1);
             let net = safe_sub(amount, fee)?;
             (net, fee)
         } else {

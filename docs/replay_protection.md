@@ -163,90 +163,60 @@ client.batch_charge(&subscription_ids, &next_nonce);
 
 To prevent races, integrate this with a serialised job queue or use optimistic concurrency: if `NonceAlreadyUsed` is returned, re-read the nonce and retry.
 
-### Security properties
+### TTL expiry race window
 
-| Threat | Mitigation |
-|---|---|
-| Cross-ledger replay | Nonce is monotonic; replaying any past transaction fails with `NonceAlreadyUsed` |
-| Out-of-order submission | Only the exact stored value is accepted; skipping nonce values is rejected |
-| Cross-domain replay | Domain tag is part of storage key; batch_charge nonce and rotate_admin nonce are fully independent |
-| Cross-signer replay | Signer address is part of storage key; each admin has its own counter |
-| Nonce overflow | `checked_add(1)` panics (transaction aborted) rather than wrapping to 0 |
-| Auth bypass via nonce manipulation | Auth check (`require_admin_auth`) runs *before* nonce check; invalid signers are rejected without advancing any counter |
+> **Important:** This section describes a scenario where the nonce storage key expires between transaction submission and ledger inclusion. Integrators must account for this to avoid losing replay protection.
 
-### Storage layout
+#### How Soroban persistent storage TTL works
 
-```
-Persistent storage:
-  DataKey::AdminNonce(Address, 0) → u64   (batch_charge nonce for address)
-  DataKey::AdminNonce(Address, 1) → u64   (rotate_admin nonce for address)
-```
+Every entry in Soroban persistent storage has a ledger-based time-to-live (TTL). When a key's TTL reaches zero, the entry is **evicted**. A subsequent read returns `None`, which `check_and_advance` treats as `unwrap_or(0)` — the nonce silently resets to `0`.
 
-Nonce entries are stored in **persistent** storage so they survive ledger TTL extension and contract upgrades. Growth is bounded: one `u64` entry per `(signer, domain)` pair. In practice this means at most two entries per admin address (one per domain).
+`AdminNonce` entries are written by `check_and_advance` but **no `extend_ttl` call is made on the nonce key at write time**. The TTL of each nonce entry is therefore determined entirely by the network's minimum persistent entry TTL at the time of the write, and is not renewed by subsequent nonce reads (e.g. `get_admin_nonce`).
 
-## Admin-operation nonce scheme
-
-Privileged admin operations (`batch_charge` and `rotate_admin`) carry an additional layer of replay protection through an explicit, domain-separated, monotonic nonce scheme.
-
-### Design
-
-| Property | Value |
-|---|---|
-| Nonce type | `u64` (unsigned, monotonic) |
-| Per-signer | One counter per `(signer: Address, domain: u32)` pair |
-| Storage | Persistent storage, key `DataKey::AdminNonce(Address, u32)` |
-| Initial value | `0` (absent key treated as `0`) |
-| Enforcement | Caller provides the *current* stored value; contract checks equality, then atomically increments |
-| Error on mismatch | `Error::NonceAlreadyUsed` (code `1038`) |
-
-### Domain constants
-
-```rust
-pub const DOMAIN_BATCH_CHARGE: u32 = 0;   // label: "batch"
-pub const DOMAIN_ADMIN_ROTATION: u32 = 1;  // label: "adm_rot"
-```
-
-Domain separation ensures that a nonce consumed in one operation cannot interfere with another. The labels appear in the emitted event topic so indexers can filter by domain.
-
-### Nonce consumption flow
+#### The race window
 
 ```
-caller → batch_charge(ids, nonce)
-  1. require_stored_admin_auth()   // auth check first – fails fast on wrong signer
-  2. check_and_advance(admin, DOMAIN_BATCH_CHARGE, nonce)
-       a. read stored nonce (default 0)
-       b. assert provided == stored  → Error::NonceAlreadyUsed if not
-       c. write stored + 1
-       d. emit NonceConsumedEvent
-  3. … rest of charge logic
+time ──────────────────────────────────────────────────────────────▶
+          T0                    T1                 T2
+          │                     │                  │
+   tx submitted          nonce key TTL         tx included
+  (nonce = N read,        reaches 0             in ledger
+   tx built with          (key evicted,         (nonce read
+   max_time = T2)          stored = 0)           returns 0 ✓)
 ```
 
-### Emitted event
+1. At `T0`, the off-chain caller reads `nonce = N` via `get_admin_nonce`.
+2. A transaction is built carrying `nonce = N` and submitted with `max_time = T2`.
+3. Before the transaction is included in a ledger, the `AdminNonce` key's TTL expires at `T1`. The key is evicted; stored value is effectively `0`.
+4. At `T2` the transaction is included. `check_and_advance` reads `0`, the provided nonce is `N`. If `N = 0` the check passes and the operation executes. If `N > 0` the check fails with `NonceAlreadyUsed`, but the *next* transaction built with `nonce = 0` would succeed — replay protection is broken for that domain until the counter advances past `0` again.
 
-Every successful nonce consumption emits a `NonceConsumedEvent`:
+The critical consequence is that **an attacker who captured a prior transaction carrying `nonce = 0` (the very first operation ever submitted for that domain) can replay it after the key has been evicted**, because the stored value resets to `0` and the check passes.
 
-```rust
-pub struct NonceConsumedEvent {
-    pub signer:    Address,  // the admin address that consumed the nonce
-    pub domain:    u32,      // DOMAIN_BATCH_CHARGE or DOMAIN_ADMIN_ROTATION
-    pub nonce:     u64,      // the consumed (previous) nonce value
-    pub timestamp: u64,      // ledger timestamp at consumption
-}
+#### Recommendation: set `max_time` shorter than the nonce key TTL
+
+The simplest mitigation is to ensure the transaction's validity window is always shorter than the remaining TTL of the nonce key:
+
+```
+max_time - now  <<  remaining_TTL(AdminNonce key)
 ```
 
-Event topic: `("nonce_consumed", signer, domain_label)` where `domain_label` is the human-readable symbol (`"batch"` or `"adm_rot"`).
+**Practical guidance:**
 
-### Off-chain integration
+- Soroban persistent entries have a network-configured minimum TTL (currently 4,096 ledgers on Mainnet ≈ ~5.7 hours at 5 s/ledger). After a nonce write, the key lives for at least this long.
+- Set `max_time` to **no more than 30 minutes** in the future. This gives the transaction plenty of inclusion time (Stellar's typical inclusion time is seconds to minutes) while staying well within the ~5.7-hour minimum TTL.
+- If your integration requires longer validity windows, call `extend_ttl` on the `AdminNonce` key before or immediately after writing, bumping it to a value longer than your maximum intended `max_time`.
 
-Use `get_admin_nonce(signer, domain) -> u64` to read the expected nonce before submitting a transaction:
+| Parameter | Recommended value | Rationale |
+|---|---|---|
+| `max_time` (tx validity) | ≤ 30 minutes | Short enough that any reasonable TTL outlasts it |
+| Nonce key TTL | ≥ 2× `max_time` | Leaves margin for clock skew and network delays |
+| TTL bump (if needed) | Target ≥ 24 hours | Covers operational retries and maintenance windows |
 
-```rust
-// Pseudocode
-let next_nonce = client.get_admin_nonce(&admin, DOMAIN_BATCH_CHARGE);
-client.batch_charge(&subscription_ids, &next_nonce);
-```
+#### What happens if the race is hit
 
-To prevent races, integrate this with a serialised job queue or use optimistic concurrency: if `NonceAlreadyUsed` is returned, re-read the nonce and retry.
+- If nonce `N > 0` at the time of eviction, the in-flight transaction fails with `NonceAlreadyUsed` (because stored resets to `0`, not `N`). No double-execution occurs, but the transaction must be rebuilt with `nonce = 0`.
+- If nonce `N = 0` (first-ever operation for that signer/domain) and the key is evicted then the transaction is included, the operation executes normally. A replay of the same transaction would now be blocked because the stored nonce is `1`.
+- The most dangerous case is if `N = 0`, the operation executed, the key later expires, and a captured copy of the original `nonce = 0` transaction is resubmitted. To prevent this, either keep the TTL alive (above) or accept that `nonce = 0` operations carry slightly elevated replay risk and use short `max_time` windows.
 
 ### Security properties
 
@@ -258,6 +228,7 @@ To prevent races, integrate this with a serialised job queue or use optimistic c
 | Cross-signer replay | Signer address is part of storage key; each admin has its own counter |
 | Nonce overflow | `checked_add(1)` panics (transaction aborted) rather than wrapping to 0 |
 | Auth bypass via nonce manipulation | Auth check (`require_admin_auth`) runs *before* nonce check; invalid signers are rejected without advancing any counter |
+| TTL expiry mid-flight | Keep `max_time` ≤ 30 min and/or extend nonce key TTL to outlast the validity window (see TTL expiry race window above) |
 
 ### Storage layout
 
