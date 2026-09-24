@@ -80,7 +80,7 @@ fn setup_merchant_and_sub(
     );
 
     token_admin.mint(&subscriber, &10_000i128);
-    client.deposit_funds(&sub_id, &subscriber, &1_000i128, &None);
+    client.deposit_funds(&sub_id, &1_000i128, &None);
 
     (sub_id, merchant, subscriber)
 }
@@ -314,7 +314,7 @@ fn test_vacation_does_not_affect_other_merchants() {
     );
 
     token_admin.mint(&subscriber2, &10_000i128);
-    client.deposit_funds(&sub_id2, &subscriber2, &1_000i128, &None);
+    client.deposit_funds(&sub_id2, &1_000i128, &None);
 
     let now = env.ledger().timestamp();
 
@@ -364,7 +364,7 @@ fn test_vacation_usage_charge_blocked() {
     );
 
     token_admin.mint(&subscriber, &10_000i128);
-    client.deposit_funds(&sub_id, &subscriber, &1_000i128, &None);
+    client.deposit_funds(&sub_id, &1_000i128, &None);
 
     let now = env.ledger().timestamp();
 
@@ -413,7 +413,7 @@ fn test_vacation_split_payees_blocked() {
     );
 
     token_admin.mint(&subscriber, &10_000i128);
-    client.deposit_funds(&sub_id, &subscriber, &1_000i128, &None);
+    client.deposit_funds(&sub_id, &1_000i128, &None);
 
     let now = env.ledger().timestamp();
 
@@ -460,7 +460,7 @@ fn test_vacation_past_subscription_expiration() {
     );
 
     token_admin.mint(&subscriber, &10_000i128);
-    client.deposit_funds(&sub_id, &subscriber, &1_000i128, &None);
+    client.deposit_funds(&sub_id, &1_000i128, &None);
 
     // Set vacation that starts after subscription expiration
     client.set_merchant_vacation(&merchant, &(expires_at - 100), &(expires_at + 5000));
@@ -489,12 +489,8 @@ fn test_vacation_deposit_blocked() {
     client.set_merchant_vacation(&merchant, &now, &(now + 3600));
 
     // Deposit should be blocked
-    let res = client.try_deposit_funds(
-        &sub_id,
-        &subscriber,
-        &500i128,
-        &None,
-    );
+    let res = client.try_deposit_funds(&sub_id, &500i128,
+        &None,);
     assert_eq!(res, Err(Ok(Error::VacationActive)));
 }
 

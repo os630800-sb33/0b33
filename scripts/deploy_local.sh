@@ -193,6 +193,26 @@ check_docker() {
     ok "Docker: $(docker --version 2>/dev/null)"
 }
 
+check_docker_daemon() {
+    if ! docker info >/dev/null 2>&1; then
+        printf '%s\n' \
+            "ERROR: Docker daemon is not running." \
+            "" \
+            "The docker binary was found, but the daemon is not available." \
+            "" \
+            "Start the Docker daemon:" \
+            "  • Linux: systemctl start docker  (or use your init system)" \
+            "  • macOS: open -a Docker" \
+            "  • Windows: Start Docker Desktop" \
+            "" \
+            "If you have a network running locally without Docker," \
+            "use: ./scripts/deploy_local.sh --no-docker" \
+            >&2
+        exit 1
+    fi
+    ok "Docker daemon is running."
+}
+
 # =============================================================================
 # STEP 1 — Build contract WASM
 # =============================================================================
@@ -698,6 +718,7 @@ EOF
     check_curl
     if [ "${NO_DOCKER}" = "false" ]; then
         check_docker
+        check_docker_daemon
     else
         info "Skipping Docker check (--no-docker)."
     fi

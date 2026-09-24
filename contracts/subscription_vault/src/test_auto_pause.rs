@@ -60,7 +60,7 @@ fn create_funded_sub(
     );
     if prepaid > 0 {
         token_admin.mint(&subscriber, &prepaid);
-        client.deposit_funds(&id, &subscriber, &prepaid, &None);
+        client.deposit_funds(&id, &prepaid, &None);
     }
     (id, subscriber, merchant)
 }
@@ -161,7 +161,7 @@ fn test_counter_resets_on_successful_charge() {
 
     // Top up enough to cover one charge — counter resets on deposit
     tok.mint(&subscriber, &AMOUNT);
-    client.deposit_funds(&id, &subscriber, &AMOUNT, &None);
+    client.deposit_funds(&id, &AMOUNT, &None);
 
     // Successful charge — counter cleared
     jump_interval(&env);
@@ -200,7 +200,7 @@ fn test_counter_resets_on_deposit() {
 
     // Deposit (not enough to cover the charge, just enough to satisfy min_topup)
     tok.mint(&subscriber, &1_000_000i128);
-    client.deposit_funds(&id, &subscriber, &1_000_000i128, &None);
+    client.deposit_funds(&id, &1_000_000i128, &None);
 
     // The next failure is only the 1st after the reset — should not pause
     jump_interval(&env);

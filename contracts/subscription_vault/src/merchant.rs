@@ -44,8 +44,14 @@ pub fn get_merchant_paused(env: &Env, merchant: Address) -> bool {
             return true;
         }
     }
-    let key = DataKey::MerchantPaused(merchant);
-    env.storage().instance().get(&key).unwrap_or(false)
+    // Once the contract has migrated to schema v3, all merchants have been
+    // migrated onto MerchantConfig, so the legacy key is never written to
+    // and reading it on every call is unnecessary storage access.
+    if crate::admin::get_schema_version(env) < 3 {
+        let key = DataKey::MerchantPaused(merchant);
+        return env.storage().instance().get(&key).unwrap_or(false);
+    }
+    false
 }
 
 pub fn set_merchant_paused(env: &Env, merchant: Address, paused: bool) {
@@ -338,6 +344,34 @@ pub fn set_whitelist_mode(env: &Env, admin: Address, enabled: bool) -> Result<()
 pub fn is_merchant_approved(env: &Env, merchant: &Address) -> bool {
     let key = DataKey::MerchantApproved(merchant.clone());
     env.storage().instance().get(&key).unwrap_or(false)
+}
+
+/// Check if merchant is approved when whitelist mode is active.
+///
+/// **CRITICAL SECURITY**: This function must be called at the beginning of every
+/// withdrawal function to prevent revoked merchants from withdrawing funds.
+///
+/// # Returns
+/// - `Ok(())` if whitelist mode is disabled OR merchant is approved
+/// - `Err(Error::MerchantNotApproved)` if whitelist mode is enabled AND merchant is not approved
+///
+/// # Security
+/// Without this check, a merchant could:
+/// 1. Accumulate earnings while approved
+/// 2. Get revoked by admin
+/// 3. Still withdraw all accumulated funds despite revocation
+pub fn require_merchant_approved(env: &Env, merchant: &Address) -> Result<(), Error> {
+    // If whitelist mode is disabled, all merchants are implicitly approved
+    if !is_whitelist_mode_enabled(env) {
+        return Ok(());
+    }
+    
+    // If whitelist mode is enabled, merchant must be explicitly approved
+    if !is_merchant_approved(env, merchant) {
+        return Err(Error::MerchantNotApproved);
+    }
+    
+    Ok(())
 }
 
 /// Approve a merchant under whitelist mode. Admin-only.
@@ -700,14 +734,16 @@ pub fn get_reconciliation_snapshot(
             .checked_sub(earnings.refunds)
             .unwrap_or(0);
 
+        let stored_balance = get_merchant_balance_by_token(env, merchant, &token);
+
         result.push_back(TokenReconciliationSnapshot {
             token: token.clone(),
             total_accruals,
             total_withdrawals: earnings.withdrawals,
             total_refunds: earnings.refunds,
             computed_balance,
-            stored_balance: 0,              // Will be computed by caller
-            matches: computed_balance == 0, // Placeholder
+            stored_balance,
+            matches: computed_balance == stored_balance,
         });
     }
     result
@@ -850,6 +886,10 @@ pub fn withdraw_merchant_funds_for_token(
 ) -> Result<(), Error> {
     merchant.require_auth();
 
+    // CRITICAL SECURITY: Verify merchant is still approved under whitelist mode
+    // Without this check, revoked merchants could withdraw all accumulated funds
+    require_merchant_approved(env, &merchant)?;
+
     if let Some(config) = get_merchant_multisig_config(env, merchant.clone()) {
         let required_signers = config.threshold.min(config.signers.len() as u32);
         let mut iter = 0u32;
@@ -964,6 +1004,11 @@ pub fn merchant_refund(
     amount: i128,
 ) -> Result<(), Error> {
     merchant.require_auth();
+    
+    // CRITICAL SECURITY: Verify merchant is still approved under whitelist mode
+    // Without this check, revoked merchants could still issue refunds
+    require_merchant_approved(env, &merchant)?;
+    
     if amount <= 0 {
         return Err(Error::InvalidAmount);
     }
@@ -1142,6 +1187,10 @@ fn flush_merchant_token(
 ///
 /// Returns the number of token payouts actually executed.
 pub fn do_flush_payouts(env: &Env, merchant: Address, caller: Address) -> Result<u32, Error> {
+    // CRITICAL SECURITY: Verify merchant is still approved under whitelist mode
+    // Without this check, revoked merchants could flush accumulated payouts
+    require_merchant_approved(env, &merchant)?;
+    
     let schedule = get_payout_schedule(env, &merchant);
 
     // No schedule configured — nothing to do.
@@ -1589,6 +1638,7 @@ pub fn do_register_plan(
         amount,
         interval_seconds,
         trial_seconds,
+        trial_period_seconds: (trial_seconds > 0).then_some(trial_seconds),
         usage_enabled,
         lifetime_cap,
         template_key: plan_id,
@@ -1835,6 +1885,10 @@ pub fn withdraw_sub_account_funds(
     amount: i128,
 ) -> Result<(), Error> {
     merchant.require_auth();
+
+    // CRITICAL SECURITY: Verify merchant is still approved under whitelist mode
+    // Without this check, revoked merchants could withdraw sub-account funds
+    require_merchant_approved(env, &merchant)?;
 
     if amount <= 0 {
         return Err(Error::InvalidAmount);

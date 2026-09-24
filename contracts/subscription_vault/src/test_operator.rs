@@ -30,7 +30,7 @@ fn make_funded_subscription(te: &TestEnv, subscriber: &Address, merchant: &Addre
         &None::<u32>,
 );
     te.stellar_token_client().mint(subscriber, &DEPOSIT);
-    te.client.deposit_funds(&sub_id, subscriber, &DEPOSIT);
+    te.client.deposit_funds(&sub_id, &DEPOSIT);
     sub_id
 }
 
@@ -353,7 +353,7 @@ fn operator_charge_usage_succeeds() {
         &None::<u32>,
 );
     te.stellar_token_client().mint(&subscriber, &DEPOSIT);
-    te.client.deposit_funds(&sub_id, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    te.client.deposit_funds(&sub_id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 
     te.client.set_operator(&te.admin, &operator);
 
@@ -383,7 +383,7 @@ fn operator_charge_usage_wrong_operator_rejected() {
         &None::<u32>,
 );
     te.stellar_token_client().mint(&subscriber, &DEPOSIT);
-    te.client.deposit_funds(&sub_id, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    te.client.deposit_funds(&sub_id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 
     te.client.set_operator(&te.admin, &operator);
 
@@ -670,7 +670,7 @@ fn get_operator_nonce_increments_per_call() {
 
         // Re-fund so the next charge can succeed.
         te.stellar_token_client().mint(&subscriber, &AMOUNT);
-        te.client.deposit_funds(&sub_id, &subscriber, &AMOUNT, &None::<soroban_sdk::BytesN<32>>);
+        te.client.deposit_funds(&sub_id, &AMOUNT, &None::<soroban_sdk::BytesN<32>>);
     }
     assert_eq!(te.client.get_operator_nonce(&operator), 3u64);
 }
@@ -695,7 +695,7 @@ fn operator_charge_usage_with_reference_succeeds() {
         &None::<u32>,
 );
     te.stellar_token_client().mint(&subscriber, &DEPOSIT);
-    te.client.deposit_funds(&sub_id, &subscriber, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    te.client.deposit_funds(&sub_id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
 
     te.client.set_operator(&te.admin, &operator);
 

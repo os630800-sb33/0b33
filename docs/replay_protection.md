@@ -9,7 +9,7 @@ Charge operations (`charge_subscription` and, internally, each item in `batch_ch
 1. **Replay**: Charging the same billing period more than once.
 2. **Idempotent retries**: Allowing the same logical charge to be submitted multiple times (e.g. network retry) without double-debiting.
 
-Storage usage is kept bounded: one period index and one ring buffer of up to 32 idempotency key hashes per subscription.
+Storage usage is kept bounded: one period index and one ring buffer of up to 64 idempotency key hashes per subscription.
 
 ## Mechanisms
 
@@ -50,9 +50,11 @@ where `domain` is a 4-byte big-endian `u32`, `subscription_id` is a 4-byte big-e
 
 #### Ring buffer
 
-- Hashes are stored in an `IdemRingBuffer` struct capped at `IDEM_HISTORY = 32` entries per subscription.
-- A `cursor` field tracks where the next entry will be written. When the buffer is full, the oldest entry is silently overwritten (cursor wraps around).
+- Hashes are stored in an `IdemRingBuffer` struct capped at `IDEM_HISTORY = 64` entries per subscription.
+- Each entry stores `(hash, inserted_at_timestamp)`. On lookup, entries older than `IDEM_TTL_SECS = 7 days` are skipped and treated as absent, regardless of ring position.
+- A `cursor` field tracks where the next entry will be written. When the buffer is full, the oldest entry (by ring position) is silently overwritten (cursor wraps around).
 - **Storage**: One `IdemRingBuffer` per subscription (key: `DataKey::IdemKey(subscription_id)`).
+- **Combined guarantee**: An attacker must submit 64 distinct charges to the same subscription *within a 7-day window* to cycle out a single hash. This is infeasible under any normal subscription billing cadence.
 
 ### Batch charge
 
@@ -70,7 +72,7 @@ where `domain` is a 4-byte big-endian `u32`, `subscription_id` is a 4-byte big-e
 
 5. **Optional but recommended:** Persist idempotency keys in your billing engine (e.g. per subscription and period) so that retries use the same key.
 
-6. **Retry window.** Because the ring buffer holds only the 32 most recent hashes, retries must complete within 32 operations for the same subscription. After 32 newer operations, the oldest hash is evicted and a retry with that key would be processed as a fresh operation.
+6. **Retry window.** Idempotency entries expire after 7 days (`IDEM_TTL_SECS`). Retries must use the same key within that window. After 7 days (or after 64 newer operations on the same subscription, whichever comes first), the oldest hash is evicted and a retry with that key would be processed as a fresh operation.
 
 ## Required parameters and behavior (Rustdoc summary)
 
@@ -90,9 +92,9 @@ where `domain` is a 4-byte big-endian `u32`, `subscription_id` is a 4-byte big-e
 ## Residual risks and mitigations
 
 - **Clock skew / timestamp manipulation:** Period is derived from ledger timestamp. Validators set ledger time; contract does not rely on caller-provided time. Mitigation: trust the network's ledger timestamp.
-- **Unbounded growth:** Only one period index and one `IdemRingBuffer` (≤ 32 entries × 32 bytes = 1,024 bytes per subscription) are stored. No unbounded growth from replay protection.
+- **Unbounded growth:** Only one period index and one `IdemRingBuffer` (≤ 64 entries × (32 + 8) bytes = ~2,560 bytes per subscription) are stored. No unbounded growth from replay protection.
 - **Key collision:** If an integrator reuses the same 32-byte key for two different billing periods on the same entrypoint, the second period's charge would be treated as idempotent (return Ok without charging). Mitigation: derive keys from period (e.g. include period start or index in the key).
-- **Ring buffer eviction:** A retry delayed by more than 32 operations will miss the ring buffer and execute as a fresh charge. Use `None` or choose a short retry window.
+- **Ring buffer eviction:** A retry delayed by more than 7 days (or after 64 newer operations on the same subscription) will miss the ring buffer and execute as a fresh charge. Use `None` or keep retries within the TTL window.
 - **Cross-entrypoint safety:** Domain separation in the hash prevents the same raw key from replaying across `charge_subscription`, `deposit_funds`, and `charge_one_off`.
 
 ---

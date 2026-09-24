@@ -28,7 +28,27 @@ Each helper function provides specific guarantees:
 - **Guarantee**: Returns the difference of `a` and `b` if no underflow occurs
 - **Error**: Returns `Error::Underflow` if result would go below `i128::MIN`
 - **Use Case**: General subtraction operations
-- **Note**: Allows negative results (use `safe_sub_balance` for balance operations)
+- **Note**: Allows negative results. It checks only the `i128` arithmetic range;
+  it does not enforce balance or amount invariants.
+
+### `safe_sub` versus `safe_sub_balance`
+
+Use `safe_sub` for general signed arithmetic where a negative result is valid,
+such as a signed delta or adjustment. Use `safe_sub_balance` for token or
+prepaid-balance deductions, where the result must not be negative.
+
+`safe_sub_balance(balance, amount)` adds two domain checks before performing
+the checked subtraction:
+
+1. `amount` must be non-negative.
+2. `balance` must be at least `amount`, so the result cannot fall below zero.
+
+It then delegates to the checked arithmetic performed by `safe_sub`, so an
+`i128` underflow is also reported as `Error::Underflow`. Callers must maintain
+the precondition that `balance` is itself non-negative; the helper prevents a
+new negative result from a valid balance but is not a substitute for validating
+or repairing corrupted state. A negative amount is rejected rather than being
+treated as an addition.
 
 ### `validate_non_negative(amount: i128) -> Result<(), Error>`
 - **Guarantee**: Validates that an amount is non-negative (>= 0)

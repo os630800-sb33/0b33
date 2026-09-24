@@ -242,3 +242,78 @@ All adapters share the same `OracleAdapter` trait and return a `u128` price scal
 | Manipulation resistance | Low      | High (median)         | Perfect (static) |
 | Oracle dependency       | Required | Required              | None             |
 | Admin auth to change    | Yes      | Yes                   | Yes              |
+
+---
+
+## Per-merchant staleness threshold (Issue #147 / #187)
+
+### Problem
+
+High-frequency billing (e.g. minute/hourly intervals) needs tighter oracle
+freshness than monthly plans. A single compile-time `MAX_ORACLE_AGE` cannot
+express that trade-off: either short-interval merchants reject healthy quotes,
+or long-interval merchants accept quotes that are too old for their risk model.
+
+### Current behavior (already runtime-configurable)
+
+Staleness is **not** a compile-time constant in the vault today. Admins set a
+global threshold through:
+
+```text
+set_oracle_config(admin, enabled, oracle, max_age_seconds)
+```
+
+`resolve_charge_amount` rejects quotes when
+`now - price.timestamp > max_age_seconds` and returns `OraclePriceStale` (`5008`)
+**before** any balance mutation. The same `max_age_seconds` value is used for
+oracle liveness health checks (`age <= max_age_seconds / 2`).
+
+### Design decision for this release: keep the threshold global
+
+We keep a **single vault-wide** `max_age_seconds` rather than adding a
+per-merchant (or per-subscription) override in this change.
+
+Rationale:
+
+1. **One oracle feed, one freshness contract.** The vault reads a shared oracle
+   adapter (`Spot` / `TWAP` / `FixedRate`). Mixing merchant-specific ages against
+   the same feed makes monitoring and incident response harder: a quote can be
+   "fresh" for merchant A and "stale" for merchant B in the same ledger.
+2. **Circuit-breaker coherence.** Deviation checks and liveness events are keyed
+   off the global config. Divergent ages would desynchronize breaker trips from
+   staleness failures.
+3. **Storage / migration cost.** Extending `MerchantConfig` or adding a new
+   `DataKey` discriminant requires a careful storage migration and expands the
+   admin surface. That is deferred until there is a clear operator demand.
+4. **Security floor stays simple.** Ledger close-time skew already argues for a
+   minimum safe window (≥ 60s). A global floor is easier to audit than
+   per-merchant exceptions that could be set unsafely low.
+
+### Recommended global values by billing cadence
+
+| Cadence | Suggested `max_age_seconds` | Notes |
+| --- | --- | --- |
+| Sub-hourly / high-frequency | 60–120 | Stay above the 60s safety floor |
+| Daily | 300–900 | Align with TWAP window when used |
+| Weekly / monthly | 900–3600 | Still reject multi-hour outages |
+
+Operators who need tighter guarantees for a subset of merchants should run a
+dedicated vault instance (or oracle adapter kind) with a stricter global age,
+rather than mixing thresholds in one deployment.
+
+### Future extension (not implemented)
+
+If per-merchant tuning becomes necessary:
+
+1. Add optional `oracle_max_age_seconds: Option<u64>` under
+   `DataKey::MerchantConfig` **or** a dedicated discriminant
+   `MerchantOracleMaxAge(Address)`.
+2. Define `effective_max_age(merchant) = merchant_override.unwrap_or(global)`,
+   with `effective_max_age >= 60` enforced at write time.
+3. Emit `oracle_config_updated` (or a merchant-scoped event) when overrides
+   change; keep charge failure codes unchanged (`OraclePriceStale`).
+4. Document migration / rollback: clearing the override restores global
+   behavior with no evidence rewrite.
+
+Until that ships, configure `max_age_seconds` globally to the **strictest**
+merchant class on the vault.
