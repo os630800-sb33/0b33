@@ -6,6 +6,7 @@
 //! **Security properties:**
 //! - Guardian additions/removals tracked via proposals, not direct admin calls.
 //! - Quorum validation required on every proposal execution.
+//! - Minimum timelock delay enforced (no same-ledger execution).
 //! - Stale proposals cannot execute (ETA check).
 //! - Double-voting is prevented (per-guardian vote tracking).
 //! - Guardian removal mid-vote invalidates their prior votes.
@@ -20,15 +21,9 @@ use soroban_sdk::{Address, Env, Map, String, Symbol, Vec};
 #[allow(dead_code)]
 const DOMAIN_GOVERNANCE: u32 = 3;
 
-/// Floor on the effective quorum required to execute any proposal, regardless
-/// of the per-proposal `quorum_bps` supplied at submission time.
-///
-/// `quorum_bps` is caller-supplied in [`do_submit_proposal`] and only bounded
-/// above (`<= 10_000`). Without a floor, a proposal could be submitted with
-/// `quorum_bps = 0`, making `required_votes` in [`do_execute_proposal`] zero
-/// and allowing execution of privileged actions (admin rotation, fee changes)
-/// with no real guardian consensus.
-pub const MIN_QUORUM_BPS: u32 = 5_000; // 50%
+/// Minimum timelock delay in seconds (2 days).
+/// Prevents immediate execution in the same ledger and ensures a minimum review window.
+const MIN_TIMELOCK_DELAY: u64 = 2 * 24 * 60 * 60; // 172800 seconds
 
 /// Add or update a guardian's voting weight.
 ///
@@ -76,10 +71,12 @@ fn calculate_total_weight(env: &Env) -> u32 {
 /// Submit a new governance proposal.
 ///
 /// Creates a proposal with a deterministic ID and stores it in persistent storage.
-/// Proposals require an ETA (execution timestamp) to prevent immediate execution.
+/// Proposals require an ETA (execution timestamp) that is at least MIN_TIMELOCK_DELAY
+/// seconds in the future to prevent same-ledger execution.
 ///
 /// # Errors
 /// - `InvalidInput` if quorum_bps is invalid (> 10000).
+/// - `InvalidInput` if eta does not satisfy: eta >= created_at + MIN_TIMELOCK_DELAY.
 /// - `EmergencyStopActive` if emergency stop is enabled.
 pub fn do_submit_proposal(
     env: &Env,
@@ -95,7 +92,8 @@ pub fn do_submit_proposal(
     }
 
     let now = env.ledger().timestamp();
-    if eta <= now {
+    let min_eta = now.checked_add(MIN_TIMELOCK_DELAY).ok_or(Error::Overflow)?;
+    if eta < min_eta {
         return Err(Error::InvalidInput);
     }
 
@@ -202,14 +200,18 @@ pub fn do_vote_proposal(env: &Env, proposal_id: u64, voted_yes: bool) -> Result<
     Ok(())
 }
 
-/// Execute a proposal if quorum is met and ETA has passed.
+/// Execute a proposal if quorum is met and minimum delay has elapsed.
 ///
-/// Validates quorum requirements before invoking the proposal-specific handler.
-/// Blocks re-execution via `executed` flag.
+/// Validates:
+/// 1. Minimum timelock delay: `created_at + MIN_TIMELOCK_DELAY <= now`
+/// 2. Quorum requirements
+/// 3. Blocks re-execution via `executed` flag
 ///
 /// # Errors
 /// - `NotFound` if proposal does not exist.
-/// - `InvalidInput` if ETA has not been reached or proposal already executed.
+/// - `InvalidInput` if minimum delay has not elapsed since proposal creation.
+/// - `InvalidInput` if ETA has not been reached.
+/// - `InvalidInput` if proposal already executed or quorum not met.
 pub fn do_execute_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
     let mut proposal = read_proposal(env, proposal_id)?;
 
@@ -218,6 +220,15 @@ pub fn do_execute_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
     }
 
     let now = env.ledger().timestamp();
+    
+    // ── Check minimum timelock delay from proposal creation ────────────────
+    let min_execution_time = proposal.submitted_at.checked_add(MIN_TIMELOCK_DELAY)
+        .ok_or(Error::Overflow)?;
+    if now < min_execution_time {
+        return Err(Error::InvalidInput);
+    }
+
+    // ── Check that ETA has passed ──────────────────────────────────────────
     if now < proposal.eta {
         return Err(Error::InvalidInput);
     }
