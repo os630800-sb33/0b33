@@ -762,10 +762,15 @@ pub fn do_deposit_funds(
     subscription_id: u32,
     subscriber: Address,
     amount: i128,
-    idem_key: Option<soroban_sdk::BytesN<32>>,
+    nonce: Option<u64>,
 ) -> Result<(), Error> {
     subscriber.require_auth();
     crate::blocklist::require_not_blocklisted(env, &subscriber)?;
+
+    // Check and advance nonce BEFORE any state mutations (replay protection)
+    if let Some(nonce_val) = nonce {
+        crate::nonce::check_and_advance(env, &subscriber, crate::nonce::DOMAIN_DEPOSIT_FUNDS, nonce_val)?;
+    }
 
     // CHECKS: Validate all preconditions before any state mutations
     let min_topup: i128 = crate::admin::get_min_topup(env)?;
@@ -810,19 +815,6 @@ pub fn do_deposit_funds(
             );
         }
         return Err(Error::SubscriptionExpired);
-    }
-
-    // Idempotent return: same idempotency key already processed
-    if let Some(ref k) = idem_key {
-        let hashed = crate::idempotency::hash_idem_key(
-            env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
-            subscription_id,
-            k,
-        );
-        if crate::idempotency::check_key(env, subscription_id, &hashed) {
-            return Ok(());
-        }
     }
 
     let token_addr = sub.token.clone();
@@ -893,17 +885,6 @@ pub fn do_deposit_funds(
                 schema_version: crate::types::EVENT_SCHEMA_VERSION,
             },
         );
-    }
-
-    // Record idempotency key after successful deposit
-    if let Some(k) = idem_key {
-        let hashed = crate::idempotency::hash_idem_key(
-            env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
-            subscription_id,
-            &k,
-        );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
     }
 
     Ok(())
@@ -2607,9 +2588,14 @@ pub fn do_deposit_funds_on_behalf(
     subscription_id: u32,
     payer: Address,
     amount: i128,
-    idem_key: Option<soroban_sdk::BytesN<32>>,
+    nonce: Option<u64>,
 ) -> Result<(), Error> {
     payer.require_auth();
+
+    // Check and advance nonce BEFORE any state mutations (replay protection)
+    if let Some(nonce_val) = nonce {
+        crate::nonce::check_and_advance(env, &payer, crate::nonce::DOMAIN_DEPOSIT_FUNDS, nonce_val)?;
+    }
 
     let mut sub = get_subscription(env, subscription_id)?;
     let subscriber = sub.subscriber.clone();
@@ -2661,19 +2647,6 @@ pub fn do_deposit_funds_on_behalf(
             );
         }
         return Err(Error::SubscriptionExpired);
-    }
-
-    // Idempotent return
-    if let Some(ref k) = idem_key {
-        let hashed = crate::idempotency::hash_idem_key(
-            env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
-            subscription_id,
-            k,
-        );
-        if crate::idempotency::check_key(env, subscription_id, &hashed) {
-            return Ok(());
-        }
     }
 
     let token_addr = sub.token.clone();
@@ -2742,17 +2715,6 @@ pub fn do_deposit_funds_on_behalf(
                 schema_version: crate::types::EVENT_SCHEMA_VERSION,
             },
         );
-    }
-
-    // Record idempotency key
-    if let Some(k) = idem_key {
-        let hashed = crate::idempotency::hash_idem_key(
-            env,
-            crate::nonce::DOMAIN_DEPOSIT_FUNDS,
-            subscription_id,
-            &k,
-        );
-        crate::idempotency::push_key(env, subscription_id, &hashed);
     }
 
     Ok(())

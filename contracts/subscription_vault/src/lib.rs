@@ -1621,7 +1621,7 @@ impl SubscriptionVault {
         subscription_id: u32,
         subscriber: Address,
         amount: i128,
-        idem_key: Option<soroban_sdk::BytesN<32>>,
+        nonce: Option<u64>,
     ) -> Result<(), Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "deposit_funds")?;
@@ -1630,7 +1630,7 @@ impl SubscriptionVault {
             subscription_id,
             subscriber.clone(),
             amount,
-            idem_key,
+            nonce,
         )?;
         let sub = queries::get_subscription(&env, subscription_id)?;
         env.events().publish(
@@ -1692,7 +1692,7 @@ impl SubscriptionVault {
         subscription_id: u32,
         payer: Address,
         amount: i128,
-        idem_key: Option<soroban_sdk::BytesN<32>>,
+        nonce: Option<u64>,
     ) -> Result<(), Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "deposit_funds_on_behalf")?;
@@ -1701,7 +1701,7 @@ impl SubscriptionVault {
             subscription_id,
             payer,
             amount,
-            idem_key,
+            nonce,
         )
     }
 
