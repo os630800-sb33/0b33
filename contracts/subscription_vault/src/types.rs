@@ -1067,6 +1067,8 @@ pub enum Error {
     UnknownMerchantTag = 7005,
     /// The same tag appears more than once in a single `set_merchant_tags` call.
     DuplicateMerchantTag = 7006,
+    /// Merchant tag count exceeds `MAX_MERCHANT_TAGS`.
+    MerchantTagLimitExceeded = 7007,
 
     // --- Token (8000-8099) ---
     /// Token decimals value is invalid (e.g. zero).
