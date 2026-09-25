@@ -10,9 +10,64 @@ Despite careful contract design, funds can become stranded in several scenarios:
 
 - **Accidental transfers**: Users send tokens directly to the contract address by mistake
 - **Deprecated flows**: Contract upgrades or bug fixes leave funds in an inaccessible state
-- **Unreachable addresses**: Subscribers lose access to their keys after cancellation
+- **Unreachable addresses**: Subscribers lose access to their keys after cancellation (see [Recovery vs. cancellation](#recovery-vs-cancellation--what-is-and-is-not-possible) — this is *not* grounds for recovering an accounted balance)
 
 The recovery mechanism provides a last-resort option to prevent permanent fund loss while maintaining strong security guarantees.
+
+## Recovery vs. cancellation — what is and is not possible
+
+> **Short answer:** recovery is **not** a way to take back a cancelled
+> subscription's remaining prepaid balance. A cancelled subscription's funds
+> stay with the subscriber, recovered through
+> `withdraw_subscriber_funds` — not through admin recovery.
+
+This is the single most common source of confusion around this mechanism, so
+the rule is stated explicitly.
+
+### The accounting boundary that decides the answer
+
+`recover_stranded_funds` can only move **unaccounted** funds. The contract
+computes the recoverable pool as:
+
+```
+recoverable = token.balance(contract) - total_accounted(token)
+```
+
+and rejects the call with `Error::InsufficientBalance` if the requested
+`amount` exceeds it.
+
+A `Cancelled` subscription's leftover prepaid balance is **still accounted**:
+it remains a liability in `total_accounted` until the subscriber actually
+withdraws it. So the recovery pool never includes it, and
+`recover_stranded_funds` can never reach it — the call fails on the
+`InsufficientBalance` check rather than paying out.
+
+### Decision table
+
+| Situation after cancellation | Correct action | Admin recovery possible? |
+|---|---|---|
+| Subscriber still holds their keys | Subscriber calls `withdraw_subscriber_funds` | ❌ No |
+| Subscriber lost keys, but balance is accounted for | Out-of-band / social recovery process; funds remain the subscriber's | ❌ No |
+| Tokens sent to the contract address directly, not tied to any subscription | Admin recovery (`UserOverpayment`) | ✅ Yes |
+| `contract_balance` exceeds `total_accounted` for reasons of a past bug | Admin recovery (`SystemCorrection`) | ✅ Yes |
+| Merchant balance that is normally withdrawable | `withdraw_merchant_funds` | ❌ No |
+
+### Why the boundary is enforced this way
+
+Allowing admin recovery to reach a cancelled subscription's balance would let
+an admin confiscate prepaid funds from subscribers at will, with only the
+multi-sig approval as a speed bump. The `recoverable` bound means the admin
+can only ever move funds that **no** participant is entitled to. Subscriber
+entitlements survive cancellation by design.
+
+### Documented `ExpiredEscrow` scope
+
+The `ExpiredEscrow` recovery reason below covers the *stranded* residue of a
+cancelled subscription — for example a refund that was computed but whose
+transfer failed, leaving tokens at the contract that are still counted as
+accounted. It does **not** authorise recovery of a live, accounted prepaid
+balance. When in doubt, query `get_token_reconciliation` first: if the amount
+you intend to recover is inside `total_accounted`, it is not a recovery.
 
 ## Recovery Scenarios
 
