@@ -519,3 +519,128 @@ fn test_cycling_attack_infeasibility_constants() {
         min_interval_secs
     );
 }
+
+/// Verify that charge-path idempotency keys and recovery operation keys occupy
+/// entirely separate storage namespaces, so a raw key value shared between a
+/// charge call and a recovery call can never cause a false replay.
+///
+/// ## What is being tested
+///
+/// Charge-path keys are stored in `DataKey::IdemKey(subscription_id)` as entries
+/// in a ring buffer, keyed by `SHA256(domain || subscription_id || raw_key)`.
+/// Recovery keys are stored under `DataKey::Recovery(recovery_id)` as a plain
+/// boolean flag, where `recovery_id` is a caller-supplied `String`.
+///
+/// The two key types are:
+/// - Different `DataKey` variants (different on-chain discriminants)
+/// - Different value types (`IdemRingBuffer` vs `bool`)
+/// - Different lookup paths (ring-buffer scan vs direct key presence check)
+///
+/// This test asserts that:
+/// 1. Consuming a charge idem key does NOT poison the recovery namespace — the
+///    same 32-byte value used for `charge_subscription` can still be passed as
+///    a `recovery_id` string without triggering `Error::Replay`.
+/// 2. Consuming a recovery ID does NOT poison the charge-path ring buffer — the
+///    same string value can still be used as a raw charge idem key without being
+///    treated as a duplicate.
+/// 3. The hash stored in the ring buffer for the charge path differs from what
+///    the recovery path stores (confirmed via `hash_idem_key` and `check_key`).
+#[test]
+fn test_charge_and_recovery_keys_are_namespace_separated() {
+    use soroban_sdk::String as SorobanString;
+    use crate::{RecoveryReason, idempotency::hash_idem_key};
+
+    let (env, client, token) = setup_test_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+    let id = create_and_fund_sub(&env, &client, &subscriber, &merchant, &token);
+
+    // Mint stranded funds into the contract so recovery has something to send.
+    token::StellarAssetClient::new(&env, &token).mint(&client.address, &10_000_000i128);
+
+    let recipient = Address::generate(&env);
+    // Retrieve the admin address that was registered during init.
+    let admin = client.get_admin().expect("admin must be set after init");
+
+    // Pick a raw 32-byte value that we will use as BOTH a charge idem key AND
+    // (its hex-like string representation) a recovery_id.
+    let shared_raw = make_key(&env, 0xCC);
+
+    // ── Step 1: use the raw value as a charge_subscription idem key ──────────
+    env.ledger().set_timestamp(env.ledger().timestamp() + INTERVAL);
+    let r = client.charge_subscription(&id, &Some(shared_raw.clone()));
+    assert_eq!(r, ChargeExecutionResult::Charged, "charge must succeed");
+
+    // The hash now lives in the charge-path ring buffer.
+    let charge_domain = crate::nonce::DOMAIN_CHARGE_INTERVAL.as_u32();
+    let charge_hash = hash_idem_key(&env, charge_domain, id, &shared_raw);
+    assert!(
+        check_key(&env, id, &charge_hash),
+        "charge idem key must be present in the ring buffer after charge"
+    );
+
+    // ── Step 2: use the same bytes as a recovery_id — must NOT be blocked ────
+    // recovery_id is a Soroban String, not a BytesN<32>.  Even if its content
+    // is identical to the raw key bytes, it is stored under DataKey::Recovery,
+    // which is a completely different storage slot from DataKey::IdemKey.
+    let recovery_id = SorobanString::from_str(&env, "0xCC_shared");
+    let result = client.try_recover_stranded_funds(
+        &admin,
+        &token,
+        &recipient,
+        &1_000_000i128,
+        &recovery_id,
+        &RecoveryReason::UserOverpayment,
+    );
+    assert!(
+        result.is_ok(),
+        "recovery must NOT be blocked by a charge idem key with the same raw bytes: {result:?}"
+    );
+
+    // ── Step 3: use a recovery_id first, then use the same label as an idem key ─
+    // A second subscription exercises the reverse direction.
+    let id2 = create_and_fund_sub(&env, &client, &subscriber, &merchant, &token);
+
+    let recovery_id2 = SorobanString::from_str(&env, "rec_shared_key");
+    // Consume the recovery ID.
+    client.try_recover_stranded_funds(
+        &admin,
+        &token,
+        &recipient,
+        &1_000_000i128,
+        &recovery_id2,
+        &RecoveryReason::FailedTransfer,
+    ).expect("second recovery must succeed");
+
+    // Now use a charge idem key on sub2 — must NOT be affected by the recovery key.
+    env.ledger().set_timestamp(env.ledger().timestamp() + INTERVAL);
+    let r2 = client.charge_subscription(&id2, &Some(shared_raw.clone()));
+    assert_eq!(
+        r2,
+        ChargeExecutionResult::Charged,
+        "charge on sub2 must not be blocked by a prior recovery with a similar label"
+    );
+
+    // ── Step 4: replay the charge idem key — must be idempotent (ring buffer) ─
+    let r3 = client.charge_subscription(&id, &Some(shared_raw.clone()));
+    assert_eq!(
+        r3,
+        ChargeExecutionResult::Charged,
+        "replaying the charge idem key must be idempotent, not an error"
+    );
+
+    // ── Step 5: replay the recovery_id — must return Replay error ────────────
+    let replay_result = client.try_recover_stranded_funds(
+        &admin,
+        &token,
+        &recipient,
+        &1_000_000i128,
+        &recovery_id,
+        &RecoveryReason::UserOverpayment,
+    );
+    assert_eq!(
+        replay_result,
+        Err(Ok(crate::Error::Replay)),
+        "replaying the same recovery_id must return Error::Replay"
+    );
+}

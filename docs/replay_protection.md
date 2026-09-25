@@ -24,11 +24,11 @@ Storage usage is kept bounded: one period index and one ring buffer of up to 64 
 
 Three entrypoints accept an optional idempotency key:
 
-| Entrypoint | Domain constant |
-|---|---|
-| `charge_subscription` | `DOMAIN_CHARGE_INTERVAL = 0` |
-| `deposit_funds` | `DOMAIN_DEPOSIT_FUNDS = 1` |
-| `charge_one_off` | `DOMAIN_CHARGE_ONEOFF = 2` |
+| Entrypoint | Domain constant | Domain value |
+|---|---|---|
+| `charge_subscription` | `DOMAIN_CHARGE_INTERVAL` | 5 |
+| `deposit_funds` | `DOMAIN_DEPOSIT_FUNDS` | 6 |
+| `charge_one_off` | `DOMAIN_CHARGE_ONEOFF` | 7 |
 
 - Each entrypoint accepts an `idem_key: Option<BytesN<32>>`.
 - If the caller supplies a key and we have already recorded the **hash** of `(domain, subscription_id, key)` for this subscription, we return the success variant without modifying state (idempotent no-op).
@@ -48,6 +48,8 @@ where `domain` is a 4-byte big-endian `u32`, `subscription_id` is a 4-byte big-e
 - The same raw key used on two different subscriptions produces different fingerprints.
 - No raw key material is visible in storage to indexers.
 
+The three entrypoint domain values are pairwise distinct (`5`, `6`, `7`) and are asserted as unique by `test_domain_constants_are_unique` in `src/nonce.rs`.
+
 #### Ring buffer
 
 - Hashes are stored in an `IdemRingBuffer` struct capped at `IDEM_HISTORY = 64` entries per subscription.
@@ -59,6 +61,25 @@ where `domain` is a 4-byte big-endian `u32`, `subscription_id` is a 4-byte big-e
 ### Batch charge
 
 - `batch_charge(subscription_ids)` does **not** take idempotency keys. Each subscription is charged with period-based replay protection only. Duplicate IDs in the list are processed independently (each may succeed or fail per period/balance/interval).
+
+### Recovery operation namespace
+
+`recover_stranded_funds` uses a **completely separate** replay-protection namespace from all charge-path idempotency keys:
+
+| Property | Charge-path idem keys | Recovery keys |
+|---|---|---|
+| Storage key | `DataKey::IdemKey(subscription_id)` | `DataKey::Recovery(recovery_id)` |
+| Value type | `IdemRingBuffer` (ring of hashes + timestamps) | `bool` (flag) |
+| Lookup | Ring scan with TTL check | Direct key presence (`has`) |
+| Key format | `SHA256(domain_u32 \|\| sub_id_u32 \|\| raw_32bytes)` | Caller-supplied `String` |
+| Discriminant | 8 (instance tier) | 15 (persistent tier) |
+
+These are different `DataKey` enum variants with different on-chain discriminants. A raw 32-byte value used as a `charge_subscription` idempotency key and a `recovery_id` string derived from the same bytes exist in entirely independent storage slots. Neither can block the other:
+
+- Consuming a charge idem key does not affect the `DataKey::Recovery` namespace.
+- Consuming a `recovery_id` does not affect any subscription's `DataKey::IdemKey` ring buffer.
+
+This separation is enforced by the type system (different `DataKey` variants) and verified by `test_charge_and_recovery_keys_are_namespace_separated` in `src/test_idempotency_keys.rs`.
 
 ## Integrator responsibilities
 
