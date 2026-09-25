@@ -542,6 +542,65 @@ result[i].success == false  → item failed; result[i].error_code indicates why
 Parse every result. A single `Unauthorized` (401) at the batch level means
 **no items** were attempted (the admin auth check precedes the loop).
 
+The returned vector has the **same length and order** as the input
+`subscription_ids`, so `result[i]` always refers to `ids[i]` — including for
+ids that were not found or were supplied more than once.
+
+#### Batching limits
+
+`batch_charge` accepts at most `BATCH_MAX_SIZE` (**100**) IDs. A larger vector
+is rejected wholesale with `BatchTooLarge` (1006) before any item runs and
+before the nonce is consumed, so the retry can reuse the same nonce. Chunk
+billing runs into groups of `<= 100`. Full details in
+[`docs/batch_charge.md`](batch_charge.md#maximum-batch-size).
+
+#### Retry strategy for partial failures
+
+The danger with partial success is charging twice: items that already
+succeeded must never be resubmitted. Follow three rules:
+
+1. **Never resubmit a successful ID.** Record which IDs returned
+   `success == true` and exclude them from every retry.
+2. **Always use a fresh nonce for a retry.** The batch nonce is consumed
+   before item processing, so replaying the same nonce value is rejected as
+   `Replay` (1102).
+3. **Classify the failure before retrying.** Some codes are transient, some
+   are terminal. Retrying a terminal code in a tight loop just burns fees.
+
+```python
+# Pseudo-code — retry only the transiently-failed subset
+def run_billing_batch(client, ids, nonce):
+    if len(ids) > BATCH_MAX_SIZE:              # 100
+        raise ValueError("chunk to <= 100 ids") # or BatchTooLarge (1006)
+
+    results = client.batch_charge(ids, nonce)  # consumes THIS nonce
+
+    succeeded, transient, terminal = [], [], []
+    for sub_id, r in zip(ids, results):         # positional: r is for sub_id
+        if r.success:
+            succeeded.append(sub_id)            # never resend these
+        elif r.error_code in TRANSIENT_CODES:    # e.g. 1101 IntervalNotElapsed
+            transient.append(sub_id)
+        else:                                   # 1001/1003/1103, 2001, 4001 …
+            terminal.append(sub_id)             # needs operator action
+
+    return succeeded, transient, terminal
+```
+
+`TRANSIENT_CODES` at minimum covers `IntervalNotElapsed` (1101) and
+`InsufficientBalance` (1001) — the latter only after a
+`RecoveryReadyEvent`/`SubscriptionResumedEvent`. The full classification is in
+[Retry Behavior for the Billing Engine](#retry-behavior-for-the-billing-engine).
+
+**Under-charging is safer than double-charging.** If the outcome of a retry is
+genuinely unknown — the transaction timed out and you cannot tell whether it
+was included — prefer re-queuing the ID for the next billing cycle. A
+successful re-charge is self-limiting: the second attempt returns
+`IntervalNotElapsed` (1101) or `Replay` (1102) rather than moving funds twice.
+See [`docs/batch_charge.md`](batch_charge.md#retry-guidance) for the
+contract-side rules and [`docs/replay_protection.md`](replay_protection.md) for
+the full idempotency and nonce scheme.
+
 ### Usage Charge Replay Protection
 
 `charge_usage_with_reference` rejects duplicate `reference` strings per
