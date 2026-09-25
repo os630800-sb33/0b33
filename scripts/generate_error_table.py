@@ -125,6 +125,7 @@ REMEDIATION: dict[str, tuple[str, str, bool]] = {
     "InvalidFeeBips":                 ("Fix fee_bips to be in range [0, 10000].", "MerchantConfigUpdatedEvent", False),
     "InvalidOperations":              ("Fix allowed_operations bitmap to use only valid OP_* bits.", "MerchantConfigUpdatedEvent", False),
     "MustAllowChargeOperation":       ("Set OP_CHARGE bit in allowed_operations; merchants must accept charges.", "MerchantConfigUpdatedEvent", False),
+    "MerchantNotApproved":            ("Request admin approval or disable whitelist mode via set_merchant_whitelist_mode.", "—", False),
     "UnknownMerchantTag":             ("Fix input; call get_tag_allowlist and use only listed tags.", "—", False),
     "DuplicateMerchantTag":           ("Remove the repeated tag from the request and retry.", "—", False),
     # Token

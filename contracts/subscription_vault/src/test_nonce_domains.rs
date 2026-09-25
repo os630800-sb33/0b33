@@ -25,7 +25,8 @@ use crate::nonce::{
     check_and_advance, compute_next_nonce, get_nonce,
     DOMAIN_BATCH_CHARGE, DOMAIN_ADMIN_ROTATION, DOMAIN_OPERATOR_BATCH_CHARGE,
     DOMAIN_METADATA_SIGNED, DOMAIN_CHARGE_INTERVAL, DOMAIN_DEPOSIT_FUNDS,
-    DOMAIN_CHARGE_ONEOFF, DOMAIN_MERCHANT_ROTATION,
+    DOMAIN_CHARGE_ONEOFF, DOMAIN_MERCHANT_ROTATION, DOMAIN_SUBSCRIBER_WITHDRAWAL,
+    DOMAIN_CHARGEBACK_DISPUTE, DOMAIN_GOVERNANCE_VOTE,
 };
 use crate::types::{DataKey, Error};
 
@@ -129,6 +130,9 @@ fn test_nonce_zero_consumption_all_domains() {
         DOMAIN_DEPOSIT_FUNDS,
         DOMAIN_CHARGE_ONEOFF,
         DOMAIN_MERCHANT_ROTATION,
+        DOMAIN_SUBSCRIBER_WITHDRAWAL,
+        DOMAIN_CHARGEBACK_DISPUTE,
+        DOMAIN_GOVERNANCE_VOTE,
     ];
 
     env.as_contract(&contract_id, || {
@@ -180,7 +184,7 @@ fn test_nonce_max_overflow_domain_isolation() {
     });
 }
 
-/// Verifies total independence across all 8 domain constants simultaneously.
+/// Verifies total independence across all 11 domain constants simultaneously.
 #[test]
 fn test_all_domains_mutual_independence() {
     let env = Env::default();
@@ -196,6 +200,9 @@ fn test_all_domains_mutual_independence() {
         DOMAIN_DEPOSIT_FUNDS,
         DOMAIN_CHARGE_ONEOFF,
         DOMAIN_MERCHANT_ROTATION,
+        DOMAIN_SUBSCRIBER_WITHDRAWAL,
+        DOMAIN_CHARGEBACK_DISPUTE,
+        DOMAIN_GOVERNANCE_VOTE,
     ];
 
     env.as_contract(&contract_id, || {
@@ -267,3 +274,118 @@ fn test_deposit_funds_nonce_replay() {
     });
 }
 
+
+/// Verifies that DOMAIN_GOVERNANCE_VOTE nonces prevent double-vote replay attacks.
+///
+/// A node that retransmits a signed vote transaction must be rejected after
+/// the first successful consumption. This test directly exercises the nonce
+/// layer; see `test_governance_vote_nonce_domain_isolation` for cross-domain
+/// non-interference.
+#[test]
+fn test_governance_vote_nonce_replay() {
+    let env = Env::default();
+    let guardian = Address::generate(&env);
+    let contract_id = env.register(crate::SubscriptionVault, ());
+
+    env.as_contract(&contract_id, || {
+        let domain = DOMAIN_GOVERNANCE_VOTE;
+
+        // Initial state: nonce is 0
+        assert_eq!(get_nonce(&env, &guardian, domain), 0);
+
+        // First vote nonce consumption must succeed
+        assert_eq!(check_and_advance(&env, &guardian, domain, 0), Ok(()));
+        assert_eq!(get_nonce(&env, &guardian, domain), 1);
+
+        // Replay of the same nonce must be rejected
+        assert_eq!(
+            check_and_advance(&env, &guardian, domain, 0),
+            Err(Error::NonceAlreadyUsed)
+        );
+
+        // Counter must not advance on failed replay
+        assert_eq!(get_nonce(&env, &guardian, domain), 1);
+
+        // Second legitimate vote nonce must succeed
+        assert_eq!(check_and_advance(&env, &guardian, domain, 1), Ok(()));
+        assert_eq!(get_nonce(&env, &guardian, domain), 2);
+
+        // Another replay attempt for nonce 0 must still fail
+        assert_eq!(
+            check_and_advance(&env, &guardian, domain, 0),
+            Err(Error::NonceAlreadyUsed)
+        );
+    });
+}
+
+/// Verifies DOMAIN_GOVERNANCE_VOTE is fully isolated from all other domains.
+///
+/// A vote nonce consumed under DOMAIN_GOVERNANCE_VOTE must not affect or be
+/// affected by any other domain's counter for the same signer.
+#[test]
+fn test_governance_vote_nonce_domain_isolation() {
+    let env = Env::default();
+    let guardian = Address::generate(&env);
+    let contract_id = env.register(crate::SubscriptionVault, ());
+
+    env.as_contract(&contract_id, || {
+        // Advance DOMAIN_BATCH_CHARGE twice so it sits at nonce 2
+        assert_eq!(check_and_advance(&env, &guardian, DOMAIN_BATCH_CHARGE, 0), Ok(()));
+        assert_eq!(check_and_advance(&env, &guardian, DOMAIN_BATCH_CHARGE, 1), Ok(()));
+
+        // DOMAIN_GOVERNANCE_VOTE must still start at 0
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_GOVERNANCE_VOTE), 0);
+
+        // Consume governance vote nonce 0 — must succeed despite DOMAIN_BATCH_CHARGE being at 2
+        assert_eq!(check_and_advance(&env, &guardian, DOMAIN_GOVERNANCE_VOTE, 0), Ok(()));
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_GOVERNANCE_VOTE), 1);
+
+        // DOMAIN_BATCH_CHARGE counter must remain unaffected
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_BATCH_CHARGE), 2);
+
+        // Replay of governance vote nonce 0 must still fail
+        assert_eq!(
+            check_and_advance(&env, &guardian, DOMAIN_GOVERNANCE_VOTE, 0),
+            Err(Error::NonceAlreadyUsed)
+        );
+
+        // All other domains must remain at their initial states
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_ADMIN_ROTATION), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_OPERATOR_BATCH_CHARGE), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_METADATA_SIGNED), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_MERCHANT_ROTATION), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_CHARGE_INTERVAL), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_DEPOSIT_FUNDS), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_CHARGE_ONEOFF), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_SUBSCRIBER_WITHDRAWAL), 0);
+        assert_eq!(get_nonce(&env, &guardian, DOMAIN_CHARGEBACK_DISPUTE), 0);
+    });
+}
+
+/// Verifies per-guardian nonce isolation: one guardian's votes cannot advance
+/// another guardian's DOMAIN_GOVERNANCE_VOTE counter.
+#[test]
+fn test_governance_vote_nonce_per_guardian_isolation() {
+    let env = Env::default();
+    let guardian1 = Address::generate(&env);
+    let guardian2 = Address::generate(&env);
+    let contract_id = env.register(crate::SubscriptionVault, ());
+
+    env.as_contract(&contract_id, || {
+        let domain = DOMAIN_GOVERNANCE_VOTE;
+
+        // Guardian 1 advances its nonce to 3
+        assert_eq!(check_and_advance(&env, &guardian1, domain, 0), Ok(()));
+        assert_eq!(check_and_advance(&env, &guardian1, domain, 1), Ok(()));
+        assert_eq!(check_and_advance(&env, &guardian1, domain, 2), Ok(()));
+        assert_eq!(get_nonce(&env, &guardian1, domain), 3);
+
+        // Guardian 2 must still be at 0, independent of guardian 1
+        assert_eq!(get_nonce(&env, &guardian2, domain), 0);
+        assert_eq!(check_and_advance(&env, &guardian2, domain, 0), Ok(()));
+        assert_eq!(get_nonce(&env, &guardian2, domain), 1);
+
+        // Guardian 1 counter must be unchanged by guardian 2's activity
+        assert_eq!(get_nonce(&env, &guardian1, domain), 3);
+    });
+}

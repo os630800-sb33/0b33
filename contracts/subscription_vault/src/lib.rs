@@ -3325,13 +3325,15 @@ impl SubscriptionVault {
     /// # Arguments
     /// * `proposal_id` — ID of the proposal to vote on.
     /// * `voted_yes` — true to vote for, false to vote against.
+    /// * `nonce` — per-guardian monotonic nonce (`DOMAIN_GOVERNANCE_VOTE`) for replay protection.
     ///
     /// # Errors
     /// - `Unauthorized` if caller is not a guardian
     /// - `NotFound` if proposal does not exist
     /// - `InvalidInput` if proposal already executed
-    pub fn vote_proposal(env: Env, proposal_id: u64, voted_yes: bool) -> Result<(), Error> {
-        governance::do_vote_proposal(&env, proposal_id, voted_yes)
+    /// - `NonceAlreadyUsed` if nonce has already been consumed
+    pub fn vote_proposal(env: Env, proposal_id: u64, voted_yes: bool, nonce: u64) -> Result<(), Error> {
+        governance::do_vote_proposal(&env, proposal_id, voted_yes, nonce)
     }
 
     /// Execute a proposal if quorum is met and ETA has passed.
@@ -3541,58 +3543,4 @@ impl SubscriptionVault {
         Ok(current)
     }
 
-    // ── Multi-Sig Governance ─────────────────────────────────────────────────────
-
-    /// Add a guardian with voting weight. Admin only.
-    pub fn add_guardian(env: Env, admin: Address, guardian: Address, weight: u32) -> Result<(), Error> {
-        require_admin_auth(&env, &admin)?;
-        crate::governance::add_guardian(&env, guardian, weight)
-    }
-
-    /// Remove a guardian. Admin only.
-    pub fn remove_guardian(env: Env, admin: Address, guardian: Address) -> Result<(), Error> {
-        require_admin_auth(&env, &admin)?;
-        crate::governance::remove_guardian(&env, &guardian)
-    }
-
-    /// Get a guardian's voting weight.
-    pub fn get_guardian_weight(env: Env, guardian: Address) -> u32 {
-        crate::governance::get_guardian_weight(&env, &guardian)
-    }
-
-    /// List all guardians and their weights.
-    pub fn list_guardians(env: Env) -> Vec<(Address, u32)> {
-        crate::governance::list_guardians(&env)
-    }
-
-    /// Submit a governance proposal for multi-sig approval of critical operations.
-    pub fn submit_proposal(
-        env: Env,
-        admin: Address,
-        kind: crate::types::ProposalKind,
-        target: Address,
-        target2: Option<Address>,
-        target3: u32,
-        quorum_bps: u32,
-        eta: u64,
-    ) -> Result<u64, Error> {
-        require_admin_auth(&env, &admin)?;
-        crate::governance::do_submit_proposal(&env, kind, target, target2, target3, quorum_bps, eta)
-    }
-
-    /// Vote on a governance proposal. Guardian only.
-    pub fn vote_proposal(env: Env, guardian: Address, proposal_id: u64, voted_yes: bool) -> Result<(), Error> {
-        guardian.require_auth();
-        crate::governance::do_vote_proposal(&env, proposal_id, voted_yes)
-    }
-
-    /// Get details of a governance proposal.
-    pub fn get_proposal(env: Env, proposal_id: u64) -> Option<crate::types::Proposal> {
-        crate::governance::get_proposal(&env, proposal_id)
-    }
-
-    /// Check if multi-sig enforcement is enabled.
-    pub fn is_multisig_enabled(env: Env) -> bool {
-        admin::is_multisig_enabled(&env)
-    }
 }
