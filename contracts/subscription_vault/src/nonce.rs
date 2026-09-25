@@ -43,6 +43,7 @@ pub enum NonceDomain {
     ChargeOneoff = 7,
     SubscriberWithdrawal = 8,
     ChargebackDispute = 9,
+    GovernanceVote = 10,
 }
 
 impl NonceDomain {
@@ -66,6 +67,7 @@ impl TryFrom<u32> for NonceDomain {
             7 => Ok(NonceDomain::ChargeOneoff),
             8 => Ok(NonceDomain::SubscriberWithdrawal),
             9 => Ok(NonceDomain::ChargebackDispute),
+            10 => Ok(NonceDomain::GovernanceVote),
             _ => Err(()),
         }
     }
@@ -98,6 +100,13 @@ pub const DOMAIN_MERCHANT_ROTATION: NonceDomain = NonceDomain::MerchantRotation;
 
 pub const DOMAIN_SUBSCRIBER_WITHDRAWAL: NonceDomain = NonceDomain::SubscriberWithdrawal;
 pub const DOMAIN_CHARGEBACK_DISPUTE: NonceDomain = NonceDomain::ChargebackDispute;
+
+/// Domain constant for governance vote casting operations.
+///
+/// Prevents a captured signed vote payload from being replayed into a
+/// different operation domain. Auth check (caller must be a guardian)
+/// runs **before** the nonce check.
+pub const DOMAIN_GOVERNANCE_VOTE: NonceDomain = NonceDomain::GovernanceVote;
 
 /// Domain constant for charge_interval operations.
 pub const DOMAIN_CHARGE_INTERVAL: NonceDomain = NonceDomain::ChargeInterval;
@@ -216,6 +225,7 @@ mod tests {
         assert_eq!(DOMAIN_CHARGE_ONEOFF.as_u32(), 7);
         assert_eq!(DOMAIN_SUBSCRIBER_WITHDRAWAL.as_u32(), 8);
         assert_eq!(DOMAIN_CHARGEBACK_DISPUTE.as_u32(), 9);
+        assert_eq!(DOMAIN_GOVERNANCE_VOTE.as_u32(), 10);
     }
 
     /// All nine domain constants must be pairwise distinct — a collision here
@@ -233,6 +243,7 @@ mod tests {
             DOMAIN_CHARGE_ONEOFF,
             DOMAIN_SUBSCRIBER_WITHDRAWAL,
             DOMAIN_CHARGEBACK_DISPUTE,
+            DOMAIN_GOVERNANCE_VOTE,
         ];
         for i in 0..domains.len() {
             for j in (i + 1)..domains.len() {

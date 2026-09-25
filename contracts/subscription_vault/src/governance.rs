@@ -17,10 +17,6 @@ use crate::types::{
 };
 use soroban_sdk::{Address, Env, Map, String, Symbol, Vec};
 
-/// Governance domain for replay protection.
-#[allow(dead_code)]
-const DOMAIN_GOVERNANCE: u32 = 3;
-
 /// Minimum timelock delay in seconds (2 days).
 /// Prevents immediate execution in the same ledger and ensures a minimum review window.
 const MIN_TIMELOCK_DELAY: u64 = 2 * 24 * 60 * 60; // 172800 seconds
@@ -141,12 +137,17 @@ pub fn do_submit_proposal(
 /// prevents vote-flip griefing where a guardian could feign support during
 /// the voting window then flip their vote right at execution time.
 ///
+/// A monotonic `nonce` (per-guardian, `DOMAIN_GOVERNANCE_VOTE`) is consumed
+/// on every successful vote to prevent network-level replay of signed vote
+/// transactions.
+///
 /// # Errors
 /// - `NotFound` if proposal does not exist.
 /// - `InvalidInput` if proposal already executed.
 /// - `Unauthorized` if caller is not a valid guardian.
 /// - `InvalidInput` if the timelock (ETA) has passed and votes are locked.
-pub fn do_vote_proposal(env: &Env, proposal_id: u64, voted_yes: bool) -> Result<(), Error> {
+/// - `NonceAlreadyUsed` if the nonce has already been consumed.
+pub fn do_vote_proposal(env: &Env, proposal_id: u64, voted_yes: bool, nonce: u64) -> Result<(), Error> {
     let guardian = crate::admin::require_stored_admin_auth(env)?;
 
     let guardian_weight = get_guardian_weight(env, &guardian);
@@ -180,6 +181,9 @@ pub fn do_vote_proposal(env: &Env, proposal_id: u64, voted_yes: bool) -> Result<
         );
         return Err(Error::InvalidInput);
     }
+
+    // ── Nonce: consume before state mutation (auth already verified above) ──
+    crate::nonce::check_and_advance(env, &guardian, crate::nonce::DOMAIN_GOVERNANCE_VOTE, nonce)?;
 
     // Record the vote
     proposal.votes.set(guardian.clone(), voted_yes);
