@@ -16,7 +16,32 @@ pub const MAX_METADATA_KEYS: u32 = 10;
 pub const MAX_METADATA_KEY_LENGTH: u32 = 32;
 /// Maximum length of a metadata value in bytes.
 pub const MAX_METADATA_VALUE_LENGTH: u32 = 256;
-/// Maximum number of subscription IDs accepted by a single bulk pause/cancel call.
+/// Maximum number of subscription IDs accepted by a single batch entrypoint.
+///
+/// Applies to every entrypoint that takes a batch of subscription ids:
+/// `batch_charge`, `bulk_pause_subscriptions`, and
+/// `bulk_cancel_subscriptions`.
+///
+/// # Why this bound exists
+///
+/// A batch is charged sequentially inside a single transaction. Each id costs
+/// a bounded but non-trivial number of instructions (subscription read, fee
+/// maths, token transfer, storage writes, event emission). Because the
+/// per-transaction instruction budget is a *network* limit, not a contract
+/// limit, a batch that is too large does not fail with a contract error — it
+/// fails with a generic `exceeded budget` execution error, which is
+/// indistinguishable from a genuine out-of-gas problem and cannot be
+/// programmatically retried by the caller.
+///
+/// Capping the batch length in the contract turns that ambiguous network-level
+/// failure into a deterministic, catchable contract error *before* any state
+/// is touched, so the caller can split the batch and retry safely.
+///
+/// Callers should treat this as a hard ceiling and plan batches well below it
+/// (the integration guide recommends ~50 ids) so that per-item costs stay
+/// predictable.
+///
+/// Documented for integrators in `docs/batch_charge.md`.
 pub const BATCH_MAX_SIZE: u32 = 100;
 /// Default cap on concurrent active subscriptions per subscriber (#578).
 /// Admins can override this per-subscriber via `DataKey::SubscriberActiveCapOverride`.
@@ -1042,6 +1067,8 @@ pub enum Error {
     UnknownMerchantTag = 7005,
     /// The same tag appears more than once in a single `set_merchant_tags` call.
     DuplicateMerchantTag = 7006,
+    /// Merchant tag count exceeds `MAX_MERCHANT_TAGS`.
+    MerchantTagLimitExceeded = 7007,
 
     // --- Token (8000-8099) ---
     /// Token decimals value is invalid (e.g. zero).

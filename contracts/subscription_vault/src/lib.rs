@@ -51,6 +51,8 @@ mod safe_math;
 mod subscription;
 #[cfg(test)]
 mod test_datakey_layout;
+#[cfg(test)]
+mod test_merchant_tags;
 mod types;
 mod validation;
 
@@ -695,6 +697,16 @@ pub use types::{
     SNAPSHOT_FLAG_USAGE_CHARGED, SUB_TTL_EXTEND_TO, SUB_TTL_THRESHOLD,
 };
 
+/// Maximum number of subscription IDs accepted by a single batch entrypoint.
+///
+/// Re-exported at the crate root so the limit is part of the public contract
+/// surface and resolvable from `cargo doc`. Applies to `batch_charge`,
+/// `bulk_pause_subscriptions`, and `bulk_cancel_subscriptions`.
+///
+/// See `types::BATCH_MAX_SIZE` for the full rationale and
+/// `docs/batch_charge.md` for integrator guidance.
+pub const BATCH_MAX_SIZE: u32 = types::BATCH_MAX_SIZE;
+
 /// Maximum subscription ID this contract will ever allocate.
 pub const MAX_SUBSCRIPTION_ID: u32 = u32::MAX;
 
@@ -967,6 +979,30 @@ impl SubscriptionVault {
     /// back. The returned `Vec<BatchChargeResult>` is in request order and
     /// reports, per id, whether it succeeded and (on failure) the error code,
     /// so callers can determine exactly which ids were actually charged.
+    ///
+    /// # Batch size
+    ///
+    /// At most [`BATCH_MAX_SIZE`] (100) ids may be supplied. A longer batch is
+    /// rejected *wholesale* with [`Error::InvalidInput`] before any id is
+    /// processed and before the nonce is consumed — there are no partial
+    /// results for an oversized batch. The bound exists because the
+    /// per-transaction instruction budget is a network limit: without a
+    /// contract-level cap an oversized batch would abort with a generic
+    /// execution error that a caller cannot distinguish from out-of-gas.
+    /// Split the batch and retry with a fresh nonce. See `docs/batch_charge.md`.
+    ///
+    /// An empty batch is a no-op that returns an empty vector.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::InvalidInput`] — More than [`BATCH_MAX_SIZE`] ids supplied,
+    ///   or a duplicate id in the batch.
+    /// * [`Error::EmergencyStopActive`] — The emergency stop is engaged; no id
+    ///   is charged.
+    /// * [`Error::NonceAlreadyUsed`] — The batch nonce was already consumed.
+    ///
+    /// Individual item failures are *not* outer errors: they are reported
+    /// per-id in the returned vector.
     pub fn batch_charge(
         env: Env,
         subscription_ids: Vec<u32>,
@@ -2520,6 +2556,31 @@ impl SubscriptionVault {
     /// Unpause merchant.
     pub fn unpause_merchant(env: Env, merchant: Address) -> Result<(), Error> {
         merchant::unpause_merchant(&env, merchant)
+    }
+
+    /// Return the current admin-controlled tag allowlist.
+    pub fn get_tag_allowlist(env: Env) -> Vec<Symbol> {
+        merchant::get_tag_allowlist(&env)
+    }
+
+    /// Replace the global tag allowlist. Admin-only.
+    pub fn set_tag_allowlist(env: Env, admin: Address, tags: Vec<Symbol>) -> Result<(), Error> {
+        merchant::set_tag_allowlist(&env, admin, tags)
+    }
+
+    /// Return compliance-category tags assigned to a merchant.
+    pub fn get_merchant_tags(env: Env, merchant: Address) -> Vec<Symbol> {
+        merchant::get_merchant_tags(&env, merchant)
+    }
+
+    /// Set (fully replacing) a merchant's compliance-category tags. Admin-only.
+    pub fn set_merchant_tags(
+        env: Env,
+        admin: Address,
+        merchant: Address,
+        tags: Vec<Symbol>,
+    ) -> Result<(), Error> {
+        merchant::set_merchant_tags(&env, admin, merchant, tags)
     }
 
     /// Set a vacation window for the calling merchant. During this window, all

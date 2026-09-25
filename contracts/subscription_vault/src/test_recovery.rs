@@ -224,6 +224,72 @@ fn test_state_consistency() {
     assert_eq!(sub_balance, 50_000_000); // Got refund back
 }
 
+/// Locks in the behaviour documented in `docs/recovery.md` →
+/// "Recovery after subscription cancellation" (#245).
+///
+/// The documented rule is that `recover_stranded_funds` is **not** a recovery
+/// path for a cancelled subscription, and that the exclusion is
+/// *accounting-based* (recoverable = contract_balance - total_accounted) rather
+/// than status-based. This test proves both halves:
+///
+/// 1. While a cancelled subscription's refund is still escrowed (and therefore
+///    still inside `total_accounted`), the admin cannot recover it.
+/// 2. Cancellation by itself does not change the recoverable surplus, so it
+///    never creates admin-recoverable funds.
+#[test]
+fn test_recovery_rejected_for_cancelled_subscription_funds() {
+    let (env, client, token_addr, admin) = setup_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+    let admin_recipient = Address::generate(&env);
+    let token_client = token::StellarAssetClient::new(&env, &token_addr);
+    let balance_client = token::Client::new(&env, &token_addr);
+
+    // Prepay 50 USDC on an active subscription.
+    token_client.mint(&subscriber, &50_000_000);
+    let sub_id = client.create_subscription(
+        &subscriber,
+        &merchant,
+        &10_000_000,
+        &INTERVAL,
+        &false,
+        &None,
+        &None::<u64> & None::<u32>,
+    );
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<soroban_sdk::BytesN<32>>);
+
+    // Baseline: no unaccounted surplus, so nothing is recoverable.
+    let before = client.get_token_reconciliation(&token_addr);
+    assert_eq!(before.recoverable_amount, 0i128);
+
+    // Cancel. The refund moves into the time-locked cancellation escrow and
+    // stays inside total_accounted, so the surplus is still exactly zero.
+    client.cancel_subscription(&sub_id, &subscriber);
+    let after_cancel = client.get_token_reconciliation(&token_addr);
+    assert_eq!(after_cancel.recoverable_amount, 0i128);
+
+    // The admin must not be able to sweep the escrowed refund.
+    let rec_id = String::from_str(&env, "rec_cancelled_escrow");
+    let attempt = client.try_recover_stranded_funds(
+        &admin,
+        &token_addr,
+        &admin_recipient,
+        &50_000_000,
+        &rec_id,
+        &RecoveryReason::ExpiredEscrow,
+    );
+    assert_eq!(attempt, Err(Ok(Error::InsufficientBalance)));
+    assert_eq!(balance_client.balance(&admin_recipient), 0i128);
+
+    // After the subscriber withdraws, the refund has left the contract and the
+    // surplus is *still* zero — the subscriber, not the admin, is paid.
+    client.withdraw_subscriber_funds(&sub_id, &subscriber);
+    let after_withdraw = client.get_token_reconciliation(&token_addr);
+    assert_eq!(after_withdraw.recoverable_amount, 0i128);
+    assert_eq!(balance_client.balance(&subscriber), 50_000_000);
+    assert_eq!(balance_client.balance(&admin_recipient), 0i128);
+}
+
 // ── Reconciliation Query Tests ───────────────────────────────────────────────
 
 use crate::{

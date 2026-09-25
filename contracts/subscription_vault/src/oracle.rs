@@ -324,8 +324,18 @@ pub fn resolve_charge_amount(env: &Env, subscription: &Subscription) -> Result<i
         let ceil_adjust = safe_sub(price.price, 1)?;
         let token_amount = safe_div(safe_add(numerator, ceil_adjust)?, price.price)?;
 
+        // The resolved charge came out to zero (or negative). This is a fault
+        // in the *amount*, not in the price: `subscription.amount` was 0, so the
+        // ceiling division truncated to 0. Report `InvalidAmount` rather than
+        // `OraclePriceInvalid` — the price already passed every validity check
+        // above, and reporting a price error here would send operators hunting
+        // for an oracle fault that does not exist.
+        //
+        // Note the asymmetry with `price == 1`: that value is *valid* and
+        // yields the largest possible charge (`amount * 10^decimals`), not a
+        // zero one. See docs/oracle_pricing.md -> "Degenerate prices".
         if token_amount <= 0 {
-            return Err(Error::OraclePriceInvalid);
+            return Err(Error::InvalidAmount);
         }
         Ok(token_amount)
     }
