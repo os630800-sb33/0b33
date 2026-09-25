@@ -50,6 +50,111 @@ This preserves deterministic charging while allowing quote-currency plan pricing
 
 These errors cause the charge to fail without mutating balances.
 
+## Edge case: a price of exactly 1
+
+A price of `1` looks like a degenerate or broken oracle reading, and it is the
+boundary most likely to be reached by accident. This section documents exactly
+what happens.
+
+### Price representation
+
+Prices are not floats. The contract stores them as `u128` scaled by
+`PRICE_SCALE = 10^7` (7 decimal places, matching Stellar asset precision):
+
+```
+real_price = price / 10^7
+```
+
+So "a price of exactly 1" is the **raw value `10_000_000`**, not `1`. A raw
+value of `1` would mean a real price of `1e-7` and is rejected as degenerate
+(see below).
+
+### The conversion, and why it cannot produce a zero charge
+
+`resolve_charge_amount` in `oracle.rs` computes:
+
+```
+token_amount = ceil(quote_amount * 10^token_decimals / price)
+```
+
+implemented with overflow-checked helpers:
+
+```rust
+let scale        = safe_pow(10i128, token_decimals)?;
+let numerator    = safe_mul(subscription.amount, scale)?;
+let ceil_adjust  = safe_sub(price.price, 1)?;          // price > 0, so no underflow
+let token_amount = safe_div(safe_add(numerator, ceil_adjust)?, price.price)?;
+
+if token_amount <= 0 {
+    return Err(Error::OraclePriceInvalid);
+}
+Ok(token_amount)
+```
+
+The `ceil` is what guarantees a non-zero result. For any `quote_amount >= 1`
+and any positive price, `ceil` yields **at least 1** base unit. Concretely at
+`price = 10^7` (price 1.0) with a 6-decimal token:
+
+| `quote_amount` | `token_amount = ceil(quote / 10)` | Result |
+|----------------|-----------------------------------|--------|
+| 0 | 0 | **Rejected** — `OraclePriceInvalid` (3007) |
+| 1 | 1 | 1 base unit |
+| 5 | 1 | 1 base unit (rounds **up**) |
+| 10 | 1 | 1 base unit |
+| 11 | 2 | 2 base units |
+| 1_000_000 | 100_000 | 100_000 base units |
+
+So the specific fear — "a price of 1 produces a charge of 0 after integer
+division" — **does not occur**. The only input that produces `token_amount == 0`
+is `quote_amount == 0`, and that is rejected before any balance is touched.
+
+### Which error is returned, and why it is not `InvalidAmount`
+
+The guard returns **`OraclePriceInvalid` (3007)**, not `InvalidAmount` (3001).
+This is deliberate:
+
+- `InvalidAmount` asserts the *caller-supplied* subscription amount is
+  malformed. In this scenario `subscription.amount` is perfectly valid — the
+  thing that is wrong is the **price the oracle returned**. Reporting
+  `InvalidAmount` would send integrators to fix a plan configuration that is
+  not the problem, and away from the actual fault, which is the oracle.
+- `OraclePriceInvalid` (3007) is already documented as "Oracle returned a
+  non-positive price" and is grouped with the other oracle faults
+  (`OraclePriceUnavailable`, `OraclePriceStale`), so it routes to the correct
+  alert path.
+
+**The safety property the issue asks for is satisfied:** a zero charge is
+rejected and no balance is mutated. The specific error code differs from the
+one suggested, and the reason is the more accurate diagnosis.
+
+### Genuinely degenerate prices are rejected earlier
+
+Before the division, `resolve_charge_amount` already rejects:
+
+- `price.price <= 0` → `OraclePriceInvalid`. This covers a raw price of `0` and
+  any negative value, which is what actually protects the `safe_sub(price, 1)`
+  underflow.
+- `price.timestamp == 0` → `OraclePriceUnavailable` (no observation exists).
+- Age beyond `max_age_seconds` → `OraclePriceStale`.
+- Deviation beyond the circuit-breaker threshold → `OracleDeviationTooHigh`.
+
+A raw value of `1` (real price `1e-7`) is not rejected by the `price > 0` test.
+It is not dangerous — it yields an enormous `token_amount`, which is bounded by
+the `safe_mul` overflow check and by the subscription's own funding — but it is
+a sign of a badly scaled oracle and should be alarmed on off-chain. Treat a raw
+price below `10^6` (real price `< 0.1`) as an oracle fault.
+
+### Operational guidance
+
+- **Enforce a minimum `quote_amount` in plan configuration.** Prices of 1.0
+  combined with small quote amounts produce 1-base-unit charges whose
+  subsequent fee split is dominated by rounding. A charge this small is almost
+  always a configuration error rather than intent.
+- **Alert on the raw price, not the scaled one.** Monitor
+  `oracle_charge_resolved.price` for values `< 10^6`.
+- **Do not treat a rejected conversion as retryable.** All four oracle errors
+  are terminal for that charge attempt; the oracle data must be fixed first.
+
 ## Events
 
 For off-chain verification and indexability, the following events are emitted:
