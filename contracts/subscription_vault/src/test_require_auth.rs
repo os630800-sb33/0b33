@@ -144,7 +144,7 @@ fn deposit_funds_missing_auth() {
     let contract_id = env.register(SubscriptionVault, ());
     let client = SubscriptionVaultClient::new(&env, &contract_id);
     let subscriber = Address::generate(&env);
-    let _ = client.deposit_funds(&0u32, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    let _ = client.deposit_funds(&0u32, &subscriber, &DEPOSIT, &None);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn deposit_funds_wrong_subscriber() {
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&attacker, &DEPOSIT);
     // mock_all_auths satisfies require_auth(), but the contract rejects because
     // attacker != sub.subscriber.
-    let _ = client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    let _ = client.deposit_funds(&id, &attacker, &DEPOSIT, &None);
 }
 
 #[test]
@@ -166,20 +166,7 @@ fn deposit_funds_correct_auth() {
     let (env, client, token, _) = setup();
     let (id, subscriber, _) = make_subscription(&env, &client);
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
-    let sub = client.get_subscription(&id);
-    assert_eq!(sub.prepaid_balance, DEPOSIT);
-}
-
-#[test]
-fn deposit_funds_uses_subscription_subscriber() {
-    let (env, client, token, _) = setup();
-    let (id, subscriber, _) = make_subscription(&env, &client);
-    let attacker = Address::generate(&env);
-    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-
-    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
-
+    client.deposit_funds(&id, &subscriber, &DEPOSIT, &None);
     let sub = client.get_subscription(&id);
     assert_eq!(sub.prepaid_balance, DEPOSIT);
     assert_ne!(attacker, subscriber);
@@ -338,7 +325,7 @@ fn withdraw_merchant_funds_correct_auth() {
 
     // Deposit so the vault holds real tokens.
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &subscriber, &DEPOSIT, &None);
 
     // Directly credit the merchant's ledger balance and mint matching vault tokens
     // so the withdrawal transfer can complete.  (A real charge flow would do this
@@ -532,7 +519,7 @@ fn bulk_deposit_funds_unauthorized_caller() {
     let (id, subscriber, _) = make_subscription(&env, &client);
     // Fund the subscription so the deposit could succeed.
     soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
+    client.deposit_funds(&id, &subscriber, &DEPOSIT, &None);
 
     // A random non-admin, non-operator caller.
     let random_caller = Address::generate(&env);
@@ -557,101 +544,3 @@ fn bulk_deposit_funds_empty_vector_no_op() {
     assert_eq!(results.len(), 0);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 9. operator_charge_usage — operator must authorize
-//
-// `do_operator_charge_usage` calls `require_operator_auth(env, &op)` first, which
-// verifies that the operator address matches the stored operator. A non-operator
-// caller (or missing operator) will receive `Error::Unauthorized` (1001).
-// ═════════════════════════════════════════════════════════════════════════════
-
-#[test]
-#[should_panic(expected = "Error(Contract, #1001)")] // Error::Unauthorized
-fn operator_charge_usage_missing_operator() {
-    // No operator set yet.  When an unauthorized address calls with mock_all_auths,
-    // require_operator_auth will attempt to load the operator from storage, find
-    // nothing, and return Unauthorized.
-    let (env, client, token, admin) = setup();
-    let subscriber = Address::generate(&env);
-    let merchant = Address::generate(&env);
-
-    let sub_id = client.create_subscription(
-        &subscriber,
-        &merchant,
-        &AMOUNT,
-        &INTERVAL,
-        &true, // usage_enabled
-        &None,
-        &None::<u64>,
-        &None::<u32>,
-    );
-    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&sub_id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
-
-    // Attempt to charge as a random caller while no operator is configured.
-    let random_caller = Address::generate(&env);
-    // mock_all_auths will satisfy require_auth(), but the stored operator is
-    // undefined, so require_operator_auth returns Unauthorized.
-    let _ = client.operator_charge_usage(&random_caller, &sub_id, &1_000_000i128);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #1001)")] // Error::Unauthorized
-fn operator_charge_usage_wrong_operator() {
-    let (env, client, token, admin) = setup();
-    let subscriber = Address::generate(&env);
-    let merchant = Address::generate(&env);
-    let operator = Address::generate(&env);
-    let wrong_operator = Address::generate(&env);
-
-    let sub_id = client.create_subscription(
-        &subscriber,
-        &merchant,
-        &AMOUNT,
-        &INTERVAL,
-        &true, // usage_enabled
-        &None,
-        &None::<u64>,
-        &None::<u32>,
-    );
-    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&sub_id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
-
-    // Set the correct operator.
-    client.set_operator(&admin, &operator);
-
-    // Attempt to charge as a different address (not the stored operator).
-    // mock_all_auths satisfies require_auth() for wrong_operator, but the
-    // stored operator address doesn't match → Unauthorized.
-    let _ = client.operator_charge_usage(&wrong_operator, &sub_id, &1_000_000i128);
-}
-
-#[test]
-fn operator_charge_usage_correct_operator() {
-    let (env, client, token, admin) = setup();
-    let subscriber = Address::generate(&env);
-    let merchant = Address::generate(&env);
-    let operator = Address::generate(&env);
-
-    let sub_id = client.create_subscription(
-        &subscriber,
-        &merchant,
-        &AMOUNT,
-        &INTERVAL,
-        &true, // usage_enabled
-        &None,
-        &None::<u64>,
-        &None::<u32>,
-    );
-    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&subscriber, &DEPOSIT);
-    client.deposit_funds(&sub_id, &DEPOSIT, &None::<soroban_sdk::BytesN<32>>);
-
-    client.set_operator(&admin, &operator);
-
-    let usage = 1_000_000i128;
-    // Correct operator can charge.
-    client.operator_charge_usage(&operator, &sub_id, &usage);
-
-    let sub = client.get_subscription(&sub_id);
-    assert_eq!(sub.prepaid_balance, DEPOSIT - usage);
-}

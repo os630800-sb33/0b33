@@ -1723,10 +1723,17 @@ impl SubscriptionVault {
         env: Env,
         subscription_id: u32,
         amount: i128,
-        idem_key: Option<soroban_sdk::BytesN<32>>,
+        nonce: Option<u64>,
     ) -> Result<(), Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "deposit_funds")?;
+        subscription::do_deposit_funds(
+            &env,
+            subscription_id,
+            subscriber.clone(),
+            amount,
+            nonce,
+        )?;
         let sub = queries::get_subscription(&env, subscription_id)?;
         let subscriber = sub.subscriber.clone();
         let token = sub.token.clone();
@@ -1791,11 +1798,17 @@ impl SubscriptionVault {
         subscription_id: u32,
         payer: Address,
         amount: i128,
-        idem_key: Option<soroban_sdk::BytesN<32>>,
+        nonce: Option<u64>,
     ) -> Result<(), Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "deposit_funds_on_behalf")?;
-        subscription::do_deposit_funds_on_behalf(&env, subscription_id, payer, amount, idem_key)
+        subscription::do_deposit_funds_on_behalf(
+            &env,
+            subscription_id,
+            payer,
+            amount,
+            nonce,
+        )
     }
 
     /// Grace-period buyout: deposit enough to cover the missed charge plus a

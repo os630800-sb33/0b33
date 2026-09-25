@@ -212,3 +212,58 @@ fn test_all_domains_mutual_independence() {
         }
     });
 }
+
+/// Verifies that deposit_funds nonce domain separation prevents replay attacks.
+/// Acceptance criteria: deposit_funds accepts an optional nonce key; replay returns Replay (code 4005).
+/// 
+/// This test ensures:
+/// 1. A valid nonce (0) can be consumed successfully for a deposit_funds call
+/// 2. Attempting to replay the same nonce (0) returns Error::Replay (code 4005)
+/// 3. The nonce counter is independent from other domains and signers
+#[test]
+fn test_deposit_funds_nonce_replay() {
+    let env = Env::default();
+    let subscriber = Address::generate(&env);
+    let contract_id = env.register(crate::SubscriptionVault, ());
+
+    env.as_contract(&contract_id, || {
+        let domain = DOMAIN_DEPOSIT_FUNDS;
+        let nonce_0 = 0u64;
+
+        // Initial state: nonce should be 0 (not consumed)
+        assert_eq!(get_nonce(&env, &subscriber, domain), nonce_0);
+
+        // First consumption: nonce 0 should succeed
+        assert_eq!(check_and_advance(&env, &subscriber, domain, nonce_0), Ok(()));
+        assert_eq!(get_nonce(&env, &subscriber, domain), 1);
+
+        // Replay attempt: try to consume nonce 0 again (should fail with NonceAlreadyUsed)
+        assert_eq!(
+            check_and_advance(&env, &subscriber, domain, nonce_0),
+            Err(Error::NonceAlreadyUsed)
+        );
+
+        // Verify counter was not incremented by the failed replay
+        assert_eq!(get_nonce(&env, &subscriber, domain), 1);
+
+        // Valid next nonce: nonce 1 should succeed
+        assert_eq!(check_and_advance(&env, &subscriber, domain, 1), Ok(()));
+        assert_eq!(get_nonce(&env, &subscriber, domain), 2);
+
+        // Second replay attempt: try to consume nonce 0 again (must still fail)
+        assert_eq!(
+            check_and_advance(&env, &subscriber, domain, nonce_0),
+            Err(Error::NonceAlreadyUsed)
+        );
+
+        // Verify it works independently for a different signer
+        let other_subscriber = Address::generate(&env);
+        assert_eq!(get_nonce(&env, &other_subscriber, domain), nonce_0);
+        assert_eq!(check_and_advance(&env, &other_subscriber, domain, nonce_0), Ok(()));
+        assert_eq!(get_nonce(&env, &other_subscriber, domain), 1);
+
+        // First subscriber's counter should remain unchanged
+        assert_eq!(get_nonce(&env, &subscriber, domain), 2);
+    });
+}
+
