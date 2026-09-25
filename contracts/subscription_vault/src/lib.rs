@@ -51,6 +51,8 @@ mod safe_math;
 mod subscription;
 #[cfg(test)]
 mod test_datakey_layout;
+#[cfg(test)]
+mod test_merchant_tags;
 mod types;
 mod validation;
 
@@ -2520,6 +2522,31 @@ impl SubscriptionVault {
     /// Unpause merchant.
     pub fn unpause_merchant(env: Env, merchant: Address) -> Result<(), Error> {
         merchant::unpause_merchant(&env, merchant)
+    }
+
+    /// Return the current admin-controlled tag allowlist.
+    pub fn get_tag_allowlist(env: Env) -> Vec<Symbol> {
+        merchant::get_tag_allowlist(&env)
+    }
+
+    /// Replace the global tag allowlist. Admin-only.
+    pub fn set_tag_allowlist(env: Env, admin: Address, tags: Vec<Symbol>) -> Result<(), Error> {
+        merchant::set_tag_allowlist(&env, admin, tags)
+    }
+
+    /// Return compliance-category tags assigned to a merchant.
+    pub fn get_merchant_tags(env: Env, merchant: Address) -> Vec<Symbol> {
+        merchant::get_merchant_tags(&env, merchant)
+    }
+
+    /// Set (fully replacing) a merchant's compliance-category tags. Admin-only.
+    pub fn set_merchant_tags(
+        env: Env,
+        admin: Address,
+        merchant: Address,
+        tags: Vec<Symbol>,
+    ) -> Result<(), Error> {
+        merchant::set_merchant_tags(&env, admin, merchant, tags)
     }
 
     /// Set a vacation window for the calling merchant. During this window, all
