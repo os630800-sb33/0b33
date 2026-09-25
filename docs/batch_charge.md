@@ -12,6 +12,64 @@ pub fn batch_charge(
 ) -> Result<Vec<BatchChargeResult>, Error>
 ```
 
+## Maximum batch size
+
+`batch_charge` accepts **at most `BATCH_MAX_SIZE` (100) subscription IDs per
+call.** This bound is a hard constant, not an advisory guideline:
+
+| Constant | Value | Defined in |
+|----------|-------|------------|
+| `BATCH_MAX_SIZE` | `100` | `contracts/subscription_vault/src/types.rs` |
+
+The same constant bounds every other bulk entrypoint — `bulk_pause`,
+`bulk_cancel`, and the admin bulk operations — so `100` is the maximum batch
+size for any vector of subscription IDs the contract accepts.
+
+### Oversized batches are rejected cleanly
+
+If `subscription_ids.len() > BATCH_MAX_SIZE`, the call **fails as a whole**
+before any subscription is touched:
+
+```
+Error::BatchTooLarge   // code 1006
+```
+
+This is a typed, catchable contract error rather than a generic execution
+failure. Without this guard, an oversized batch would instead exhaust the
+Soroban per-transaction instruction budget and abort with an opaque host
+error that integrators cannot distinguish from a network or resource problem.
+
+> **Note on error taxonomy:** `BatchTooLarge` (1006) sits in the `1000-1099`
+> **auth** range but is semantically an input-validation failure, in the same
+> family as `InvalidInput` (3002). Both are caller-fixable: the caller must
+> split the batch. Integrators that only special-case `InvalidInput` should
+> also treat `BatchTooLarge` as a "fix the request" signal and split the input
+> into chunks of at most `100` IDs. See
+> [`docs/errors.md`](errors.md#canonical-table) for the canonical table.
+
+### Check ordering — a rejected batch never burns a nonce
+
+The size check runs in the shared `bulk_precheck` helper **before** the batch
+nonce is consumed:
+
+1. `require_admin_or_operator_auth` — caller must be admin or operator.
+2. `ids.len() > BATCH_MAX_SIZE` → `Err(Error::BatchTooLarge)`.
+3. `ids.is_empty()` → no-op (`Ok(false)`), no nonce consumed, no event.
+4. `check_and_advance(nonce)` — consume the per-batch nonce.
+
+Because the length check precedes step 4, a rejected oversized batch leaves
+the caller's nonce sequence **untouched**. The caller may correct the input
+and retry with the *same* nonce value; it does not have to burn a nonce on a
+request that never did any work.
+
+### Integrator guidance
+
+- Chunk large billing runs into groups of `<= 100` IDs.
+- Treat `BatchTooLarge` as terminal for that request shape — retrying the
+  identical oversized vector will fail identically.
+- Each chunk is an independent transaction, so chunk boundaries are also the
+  natural place to checkpoint progress off-chain.
+
 ## Partial-success model
 
 Admin authentication and the batch nonce check happen once at the batch
