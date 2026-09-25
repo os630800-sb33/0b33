@@ -683,6 +683,29 @@ verify_deployment() {
 # STEP 9 — Full subscription lifecycle smoke test
 # =============================================================================
 
+# Merchant's on-chain (wallet) token balance, used to prove that
+# withdraw_merchant_funds actually moved funds to the merchant.
+merchant_token_balance() {
+    "${CLI}" lab token balance \
+        --network "${NETWORK_NAME}" \
+        --asset "native" \
+        --address "${MERCHANT_ADDR}" 2>/dev/null | tr -dc '0-9' | head -c 40
+}
+
+# Merchant's withdrawable balance held inside the vault (not yet withdrawn).
+merchant_vault_balance() {
+    out=$("${CLI}" contract invoke \
+        --network "${NETWORK_NAME}" \
+        --id "${CONTRACT_ID}" \
+        -- \
+        get_merchant_balance \
+        --merchant "${MERCHANT_ADDR}" \
+        2>&1 || true)
+    # The CLI echoes the i128 result on its own line; take the last
+    # standalone integer so echoed argument values are not mistaken for it.
+    echo "${out}" | grep -oE '^[0-9]+$' | tail -1
+}
+
 smoke_test() {
     step "Smoke test: full subscription lifecycle..."
 
@@ -786,6 +809,84 @@ smoke_test() {
         warn "This may be expected: interval may not have elapsed yet, or insufficient balance."
     else
         ok "Charge succeeded."
+    fi
+
+    # 9g. Earn merchant balance, then withdraw it.
+    #
+    # The interval charge above is expected to fail on a fresh subscription
+    # (interval has not elapsed), so it cannot be relied on to produce merchant
+    # earnings. `charge_one_off` is merchant-authorised and debits prepaid
+    # balance immediately, so it gives the withdrawal path real earnings to
+    # move — which is what this step is here to regression-test.
+    info "Creating merchant earnings via charge_one_off (100000)..."
+    ONE_OFF_RESULT=$("${CLI}" contract invoke \
+        --network "${NETWORK_NAME}" \
+        --source "${MERCHANT_IDENTITY}" \
+        --id "${CONTRACT_ID}" \
+        -- \
+        charge_one_off \
+        --subscription_id "${SUB_ID}" \
+        --merchant "${MERCHANT_ADDR}" \
+        --amount 100000 \
+        2>&1 || true)
+
+    if echo "${ONE_OFF_RESULT}" | grep -qi "error"; then
+        warn "charge_one_off failed: ${ONE_OFF_RESULT}"
+        warn "Cannot verify withdrawal without earnings. Skipping 9h/9i."
+    else
+        ok "charge_one_off succeeded."
+
+        # 9h. Withdraw merchant funds
+        MERCHANT_BAL_BEFORE=$(merchant_vault_balance)
+        MERCHANT_TOKEN_BEFORE=$(merchant_token_balance)
+        info "Merchant vault balance before:  ${MERCHANT_BAL_BEFORE:-unknown}"
+        info "Merchant token balance before: ${MERCHANT_TOKEN_BEFORE:-unknown}"
+
+        WITHDRAW_AMOUNT="${MERCHANT_BAL_BEFORE:-0}"
+        if [ "${WITHDRAW_AMOUNT}" = "0" ]; then
+            warn "No withdrawable merchant balance. Skipping withdrawal check."
+        else
+            info "Withdrawing ${WITHDRAW_AMOUNT} to merchant..."
+            WITHDRAW_RESULT=$("${CLI}" contract invoke \
+                --network "${NETWORK_NAME}" \
+                --source "${MERCHANT_IDENTITY}" \
+                --id "${CONTRACT_ID}" \
+                -- \
+                withdraw_merchant_funds \
+                --merchant "${MERCHANT_ADDR}" \
+                --amount "${WITHDRAW_AMOUNT}" \
+                2>&1 || true)
+
+            if echo "${WITHDRAW_RESULT}" | grep -qi "error"; then
+                err "withdraw_merchant_funds FAILED: ${WITHDRAW_RESULT}"
+                err "A regression in the merchant withdrawal path would not be"
+                err "caught by the rest of this smoke test — treat as a failure."
+            else
+                ok "withdraw_merchant_funds succeeded."
+
+                # 9i. Assert the merchant's token balance actually increased
+                MERCHANT_BAL_AFTER=$(merchant_vault_balance)
+                MERCHANT_TOKEN_AFTER=$(merchant_token_balance)
+                info "Merchant vault balance after:   ${MERCHANT_BAL_AFTER:-unknown}"
+                info "Merchant token balance after:  ${MERCHANT_TOKEN_AFTER:-unknown}"
+
+                if [ -z "${MERCHANT_TOKEN_BEFORE}" ] || [ -z "${MERCHANT_TOKEN_AFTER}" ]; then
+                    warn "Could not read merchant token balances; withdrawal"
+                    warn "invoked successfully but the balance delta is unverified."
+                elif [ "${MERCHANT_TOKEN_AFTER}" -gt "${MERCHANT_TOKEN_BEFORE}" ] 2>/dev/null; then
+                    ok "Merchant token balance increased: ${MERCHANT_TOKEN_BEFORE} -> ${MERCHANT_TOKEN_AFTER}"
+                else
+                    err "Merchant token balance did NOT increase: ${MERCHANT_TOKEN_BEFORE} -> ${MERCHANT_TOKEN_AFTER}"
+                    err "withdraw_merchant_funds returned success but moved no funds."
+                fi
+
+                if [ "${MERCHANT_BAL_AFTER}" = "0" ] 2>/dev/null; then
+                    ok "Vault merchant balance fully drained."
+                elif [ -n "${MERCHANT_BAL_AFTER}" ] && [ "${MERCHANT_BAL_AFTER}" -lt "${WITHDRAW_AMOUNT}" ] 2>/dev/null; then
+                    warn "Vault merchant balance is lower than before (${MERCHANT_BAL_AFTER} < ${WITHDRAW_AMOUNT})."
+                fi
+            fi
+        fi
     fi
 
     ok "Smoke test complete."
