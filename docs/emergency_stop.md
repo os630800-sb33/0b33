@@ -111,6 +111,25 @@ let is_active = subscription_vault.get_emergency_stop_status();
 // Returns: false
 ```
 
+### Step 4: Reconcile Before the First Billing Run
+
+> **Deactivation does not reconcile state.** It only re-enables the
+> entrypoints. Before running charges again, follow the
+> [Post-Emergency-Stop Reconciliation Runbook](reconciliation_strategy.md#5-post-emergency-stop-reconciliation-runbook).
+
+Two things surprise operators here, and both are by design:
+
+- **Missed intervals are forgiven, not queued.** The first post-stop charge
+  bills one interval and re-baselines `last_payment_timestamp` to *now*.
+  Additional elapsed intervals are never back-billed.
+- **Usage reported during the stop was lost.** `charge_usage` calls failed, so
+  caller-metered usage is not in contract storage. The metering pipeline must
+  buffer and re-submit with fresh idempotency references.
+
+Also verify `is_balanced` via `get_token_reconciliation` before the first run;
+the stop itself does not break the accounting equation, so a violation here
+indicates an unrelated fault.
+
 ## Operations During Emergency Stop
 
 ### Blocked Operations (Financial Risk)
@@ -247,6 +266,12 @@ Use this checklist when responding to an incident:
 ### Post-Incident
 
 - [ ] Document incident timeline
+- [ ] **Run the post-emergency-stop reconciliation** — see
+      [Post-Emergency-Stop Reconciliation Runbook](reconciliation_strategy.md#5-post-emergency-stop-reconciliation-runbook)
+      in [`docs/reconciliation_strategy.md`](reconciliation_strategy.md). Lifting the
+      stop does **not** repair accounting state by itself: missed intervals are
+      forgiven by design, and usage reported during the outage was never
+      recorded and must be re-submitted.
 - [ ] Review response effectiveness
 - [ ] Update procedures if needed
 
