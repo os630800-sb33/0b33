@@ -91,14 +91,16 @@ const DEFAULT_CREATE_CAP: u32 = 50;
 
 /// Validates that `interval_seconds` is within the allowed `[MIN, MAX]` range.
 ///
-/// Returns `Err(Error::InvalidInput)` when the value is below the minimum (60 s)
-/// or above the maximum (365 days).  Zero is implicitly rejected because
-/// `MIN_SUBSCRIPTION_INTERVAL_SECONDS` is non-zero.
+/// Returns `Err(Error::InvalidInput)` when:
+/// - `interval_seconds == 0` — explicitly rejected via
+///   [`crate::validation::reject_zero_interval`] (code 3002).
+/// - The value is below the minimum (60 s) or above the maximum (365 days).
 ///
 /// This is the single authoritative validation gate: every code path that
 /// persists an interval (subscription creation, plan-template creation) must
 /// call this function rather than performing ad-hoc comparisons.
 pub fn validate_interval(interval_seconds: u64) -> Result<(), Error> {
+    crate::validation::reject_zero_interval(interval_seconds)?;
     if interval_seconds < MIN_SUBSCRIPTION_INTERVAL_SECONDS
         || interval_seconds > MAX_SUBSCRIPTION_INTERVAL_SECONDS
     {
