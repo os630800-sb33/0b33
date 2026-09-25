@@ -3514,9 +3514,9 @@ impl SubscriptionVault {
         merchant::get_merchant_config(&env, merchant)
     }
 
-    /// Returns the schema version.
+    /// Returns the on-chain storage schema version compiled into this binary.
     pub fn version(_env: Env) -> u32 {
-        1
+        STORAGE_VERSION
     }
 
     /// Returns total subscription count.
