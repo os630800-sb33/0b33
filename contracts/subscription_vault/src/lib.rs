@@ -695,6 +695,16 @@ pub use types::{
     SNAPSHOT_FLAG_USAGE_CHARGED, SUB_TTL_EXTEND_TO, SUB_TTL_THRESHOLD,
 };
 
+/// Maximum number of subscription IDs accepted by a single batch entrypoint.
+///
+/// Re-exported at the crate root so the limit is part of the public contract
+/// surface and resolvable from `cargo doc`. Applies to `batch_charge`,
+/// `bulk_pause_subscriptions`, and `bulk_cancel_subscriptions`.
+///
+/// See `types::BATCH_MAX_SIZE` for the full rationale and
+/// `docs/batch_charge.md` for integrator guidance.
+pub const BATCH_MAX_SIZE: u32 = types::BATCH_MAX_SIZE;
+
 /// Maximum subscription ID this contract will ever allocate.
 pub const MAX_SUBSCRIPTION_ID: u32 = u32::MAX;
 
@@ -967,6 +977,30 @@ impl SubscriptionVault {
     /// back. The returned `Vec<BatchChargeResult>` is in request order and
     /// reports, per id, whether it succeeded and (on failure) the error code,
     /// so callers can determine exactly which ids were actually charged.
+    ///
+    /// # Batch size
+    ///
+    /// At most [`BATCH_MAX_SIZE`] (100) ids may be supplied. A longer batch is
+    /// rejected *wholesale* with [`Error::InvalidInput`] before any id is
+    /// processed and before the nonce is consumed — there are no partial
+    /// results for an oversized batch. The bound exists because the
+    /// per-transaction instruction budget is a network limit: without a
+    /// contract-level cap an oversized batch would abort with a generic
+    /// execution error that a caller cannot distinguish from out-of-gas.
+    /// Split the batch and retry with a fresh nonce. See `docs/batch_charge.md`.
+    ///
+    /// An empty batch is a no-op that returns an empty vector.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::InvalidInput`] — More than [`BATCH_MAX_SIZE`] ids supplied,
+    ///   or a duplicate id in the batch.
+    /// * [`Error::EmergencyStopActive`] — The emergency stop is engaged; no id
+    ///   is charged.
+    /// * [`Error::NonceAlreadyUsed`] — The batch nonce was already consumed.
+    ///
+    /// Individual item failures are *not* outer errors: they are reported
+    /// per-id in the returned vector.
     pub fn batch_charge(
         env: Env,
         subscription_ids: Vec<u32>,

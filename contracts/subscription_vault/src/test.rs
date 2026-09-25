@@ -2578,8 +2578,32 @@ fn test_batch_charge_size_limit_with_duplicates() {
     }
     
     let result = test_env.client.try_batch_charge(&large_batch, &0u64);
-    // Size limit should be enforced before deduplication check
-    assert_eq!(result, Err(Ok(Error::BatchTooLarge)));
+    // Size limit should be enforced before deduplication check, and is
+    // reported as InvalidInput (not BatchTooLarge) so callers can treat it as
+    // a malformed-input rejection.
+    assert_eq!(result, Err(Ok(Error::InvalidInput)));
+    // An oversized batch is a total no-op: the nonce must not be burned, so a
+    // corrected (split) retry can reuse it.
+    assert_eq!(test_env.client.get_admin_nonce(), 0u64);
+}
+
+#[test]
+fn test_batch_charge_exactly_max_size_is_accepted() {
+    let test_env = TestEnv::default();
+    let (id1, _, _) = create_test_subscription(&test_env.env, &test_env.client, SubscriptionStatus::Active);
+
+    // Exactly BATCH_MAX_SIZE is the inclusive upper bound and must not be
+    // rejected as oversized. The repeated id trips the duplicate check, which
+    // proves the size gate let the call through.
+    let mut max_batch = Vec::<u32>::new(&test_env.env);
+    for _i in 0..crate::types::BATCH_MAX_SIZE {
+        max_batch.push_back(id1);
+    }
+    assert_eq!(max_batch.len(), crate::types::BATCH_MAX_SIZE);
+
+    let result = test_env.client.try_batch_charge(&max_batch, &0u64);
+    assert_eq!(result, Err(Ok(Error::InvalidInput))); // duplicate ids, not size
+    assert_eq!(test_env.client.get_admin_nonce(), 0u64);
 }
 
 #[test]
