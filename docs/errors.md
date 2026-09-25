@@ -135,9 +135,9 @@ Column definitions:
 | 3006 | `MetadataValueTooLong` | Invalid Args | `lib.rs`, `metadata.rs`, `test_metadata_signed.rs` | Trim value to ≤ MAX_METADATA_VALUE_LENGTH bytes and retry. | — |
 | 3007 | `OraclePriceInvalid` | Invalid Args | `oracle.rs`, `oracle_adapter.rs`, `test.rs`, `test_oracle_liveness.rs` | Treat as terminal for this request; investigate oracle data feed. | OracleConfigUpdatedEvent |
 | 3008 | `InvalidExpiration` | Invalid Args | `lib.rs`, `merchant.rs`, `subscription.rs`, `test_expiration.rs`, `test_merchant_vacation.rs` | Fix expires_at to a future ledger timestamp and retry. | — |
-| 3009 | `OracleDeviationTooHigh` | Invalid Args | `lib.rs`, `oracle.rs`, `test.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 3010 | `ProtocolFeeTooHigh` | Invalid Args | `admin.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 4001 | `InvalidStatusTransition` | State Transition | `lib.rs`, `merchant.rs`, `merchant_api.rs`, `period_snapshots.rs`, `state_machine.rs`, `subscription.rs`, `test.rs`, `test_auto_renew.rs`, `test_billing_period_snapshots.rs`, `test_expiration.rs` | Refresh subscription state before presenting the next action. | — |
+| 3009 | `OracleDeviationTooHigh` | Invalid Args | `lib.rs`, `oracle.rs`, `test.rs` | Treat as terminal; the oracle price deviated past the circuit-breaker threshold. Investigate the price feed before retrying. | OracleChargeResolvedEvent |
+| 3010 | `ProtocolFeeTooHigh` | Invalid Args | `admin.rs` | Fix protocol_fee_bps to be at most MAX_PROTOCOL_FEE_BIPS. | ProtocolFeeUpdatedEvent |
+| 4001 | `InvalidStatusTransition` | State Transition | `lib.rs`, `period_snapshots.rs`, `state_machine.rs`, `subscription.rs`, `test.rs`, `test_auto_renew.rs`, `test_billing_period_snapshots.rs`, `test_expiration.rs` | Refresh subscription state before presenting the next action. | — |
 | 4002 | `NotActive` | State Transition | `charge_core.rs`, `lib.rs`, `subscription.rs`, `test.rs`, `test_operator.rs`, `test_reentrancy_invariants.rs`, `test_subscription_status_transitions.rs` | Refresh state; do not blindly retry. | — |
 | 4003 | `SubscriptionExpired` | State Transition | `charge_core.rs`, `lib.rs`, `subscription.rs`, `test_auto_renew.rs`, `test_bulk_admin_ops.rs`, `test_delegated_payer.rs`, `test_expiration.rs`, `test_merchant_vacation.rs`, `test_reentrancy_invariants.rs` | Stop retrying mutating operations on this subscription. | SubscriptionExpiredEvent |
 | 4004 | `IntervalNotElapsed` | State Transition | `charge_core.rs`, `merchant.rs`, `test.rs`, `test_auto_renew.rs`, `test_interval_boundary.rs`, `test_payout_schedule.rs` | Retry only after next_charge_timestamp reported by get_next_charge_info. | — |
@@ -147,10 +147,10 @@ Column definitions:
 | 4008 | `AlreadyInitialized` | State Transition | `admin.rs`, `test.rs` | Do not retry; contract is already set up. | — |
 | 4009 | `MerchantPaused` | State Transition | `charge_core.rs`, `subscription.rs`, `test_delegated_payer.rs`, `test_split_billing.rs` | Retry only after merchant pause is removed (unpause_merchant). | MerchantUnpausedEvent |
 | 4010 | `Reentrancy` | State Transition | `reentrancy.rs` | Treat as a security failure; investigate calling path immediately. | — |
-| 4011 | `TimelockNotElapsed` | State Transition | `admin.rs`, `test.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
+| 4011 | `TimelockNotElapsed` | State Transition | `admin.rs`, `test.rs` | Wait until the scheduled effective timestamp; this is a timelock, not an error condition. | TreasuryChangeScheduledEvent |
 | 4013 | `NotInGracePeriod` | State Transition | `subscription.rs`, `test_grace_buyout.rs` | Refresh state; a grace-period buyout is only legal when status == GracePeriod. | — |
-| 4014 | `VacationActive` | State Transition | `charge_core.rs`, `merchant.rs`, `subscription.rs`, `test_merchant_vacation.rs`, `types.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 4015 | `EmergencyWithdrawInvalidState` | State Transition | `subscription.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
+| 4014 | `VacationActive` | State Transition | `charge_core.rs`, `merchant.rs`, `subscription.rs`, `test_merchant_vacation.rs`, `types.rs` | Retry after the merchant vacation window ends or the merchant calls unpause_merchant. | MerchantUnpausedEvent |
+| 4015 | `EmergencyWithdrawInvalidState` | State Transition | `subscription.rs` | Refresh subscription state; emergency withdraw is only valid from the states the policy allows. | — |
 | 5001 | `InsufficientBalance` | Accounting | `admin.rs`, `dispute.rs`, `lib.rs`, `merchant.rs`, `subscription.rs`, `test.rs`, `test_dispute_matrix.rs`, `test_grace_buyout.rs`, `test_merchant_full_drain.rs`, `test_merchant_sub_accounts.rs`, `test_recovery.rs`, `test_reentrancy_invariants.rs`, `test_subscription_status_transitions.rs` | Retry only after subscriber deposits funds via deposit_funds. | FundsDepositedEvent |
 | 5002 | `InsufficientPrepaidBalance` | Accounting | `charge_core.rs`, `subscription.rs`, `test.rs` | Top up subscription via deposit_funds, then retry. | FundsDepositedEvent |
 | 5003 | `BelowMinimumTopup` | Accounting | `subscription.rs`, `test.rs`, `test_delegated_payer.rs` | Increase deposit amount above get_min_topup() threshold and retry. | — |
@@ -193,32 +193,29 @@ Column definitions:
 | 10004 | `DisputeWindowElapsed` | Dispute | — | Check auto-resolution rules; dispute can now be resolved. | — |
 | 10005 | `DisputeAlreadyOpen` | Dispute | `dispute.rs`, `lib.rs`, `subscription.rs`, `test.rs`, `test_cancellation_escrow.rs` | A dispute is already open for this subscription; wait for resolution. | DisputeOpenedEvent |
 | 10006 | `DisputeAlreadyResponded` | Dispute | `dispute.rs`, `lib.rs`, `test.rs`, `test_dispute_matrix.rs` | Dispute is not in `Open` status; cannot respond twice. | DisputeRespondedEvent |
-| 10007 | `DisputeOverpay` | Dispute | `dispute.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 10008 | `SubscriberHasOpenDisputes` | Dispute | `blocklist.rs`, `test.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 11001 | `TransferIntentNotFound` | Unknown | `subscription.rs`, `test_subscription_transfer.rs` | Verify transfer initiation or expiry before retrying. | — |
-| 11002 | `TransferIntentExpired` | Unknown | `subscription.rs`, `test_subscription_transfer.rs` | Transfer intent has expired; initiate a new transfer. | — |
-| 11003 | `InvalidTransferTarget` | Unknown | `subscription.rs`, `test_subscription_transfer.rs` | Provide a valid target address (not self). | — |
-| 12001 | `CooldownActive` | Unknown | `admin.rs`, `test_multi_token_isolation.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 12002 | `RenewalWindowClosed` | Unknown | `lib.rs`, `subscription.rs`, `test_auto_renew.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 12003 | `EmergencyWithdrawCooldownActive` | Unknown | `subscription.rs`, `test_emergency_withdraw.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 12004 | `EmergencyWithdrawNotRequested` | Unknown | `subscription.rs`, `test_emergency_withdraw.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 12005 | `EmergencyWithdrawStateChanged` | Unknown | `subscription.rs`, `test_emergency_withdraw.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 13001 | `DelegatedPayerGrantNotFound` | Unknown | `subscription.rs`, `test_delegated_payer.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 13002 | `DelegatedPayerGrantExpired` | Unknown | `subscription.rs`, `test_delegated_payer.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 13003 | `DelegatedPayerAmountExceeded` | Unknown | `subscription.rs`, `test_delegated_payer.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 13004 | `EscrowNotFound` | Unknown | `dispute.rs`, `lib.rs`, `test_cancellation_escrow.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 13005 | `EscrowNotReleased` | Unknown | `dispute.rs`, `lib.rs`, `subscription.rs`, `test_cancellation_escrow.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 14001 | `ProposalNotFound` | Unknown | `admin.rs`, `test_admin_rotation_two_step.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 14002 | `ProposalExpired` | Unknown | `admin.rs`, `test_admin_rotation_two_step.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 14003 | `InvalidClaimant` | Unknown | `admin.rs`, `test_admin_rotation_two_step.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 14004 | `ProposalAlreadyExists` | Unknown | `admin.rs`, `test_admin_rotation_two_step.rs`, `test_admin_transfer_auth.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 14005 | `NoActiveProposal` | Unknown | `admin.rs`, `test_admin_rotation_two_step.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 14006 | `ProposalCooldownActive` | Unknown | `admin.rs`, `test_admin_rotation_two_step.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 15001 | `MultiSigApprovalRequired` | Unknown | — | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 15002 | `MultiSigProposalNotFound` | Unknown | `admin.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 15003 | `MultiSigQuorumNotReached` | Unknown | `admin.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-| 15004 | `MultiSigProposalExpired` | Unknown | `admin.rs` | ⚠ No remediation documented — add entry to `REMEDIATION` map in script. | — |
-
-> **⚠ Undocumented variants** — the following variants are present in `types.rs` but have no entry in the script's `REMEDIATION` map: `OracleDeviationTooHigh`, `ProtocolFeeTooHigh`, `TimelockNotElapsed`, `VacationActive`, `EmergencyWithdrawInvalidState`, `DisputeOverpay`, `SubscriberHasOpenDisputes`, `CooldownActive`, `RenewalWindowClosed`, `EmergencyWithdrawCooldownActive`, `EmergencyWithdrawNotRequested`, `EmergencyWithdrawStateChanged`, `DelegatedPayerGrantNotFound`, `DelegatedPayerGrantExpired`, `DelegatedPayerAmountExceeded`, `EscrowNotFound`, `EscrowNotReleased`, `ProposalNotFound`, `ProposalExpired`, `InvalidClaimant`, `ProposalAlreadyExists`, `NoActiveProposal`, `ProposalCooldownActive`, `MultiSigApprovalRequired`, `MultiSigProposalNotFound`, `MultiSigQuorumNotReached`, `MultiSigProposalExpired`. Add them to `scripts/generate_error_table.py` to resolve this warning.
-
+| 10007 | `DisputeOverpay` | Dispute | `dispute.rs` | Fix the resolution split so total disbursed does not exceed the escrowed amount. | DisputeResolvedEvent |
+| 10008 | `SubscriberHasOpenDisputes` | Dispute | `blocklist.rs`, `test.rs` | Resolve the subscriber's open disputes before requesting blocklist removal. | DisputeResolvedEvent |
+| 11001 | `TransferIntentNotFound` | Subscription Transfer | `subscription.rs`, `test_subscription_transfer.rs` | Verify transfer initiation or expiry before retrying. | — |
+| 11002 | `TransferIntentExpired` | Subscription Transfer | `subscription.rs`, `test_subscription_transfer.rs` | Transfer intent has expired; initiate a new transfer. | — |
+| 11003 | `InvalidTransferTarget` | Subscription Transfer | `subscription.rs`, `test_subscription_transfer.rs` | Provide a valid target address (not self). | — |
+| 12001 | `CooldownActive` | Cooldown | `admin.rs`, `test_multi_token_isolation.rs` | Wait for the per-key cooldown to elapse before mutating this config value. | — |
+| 12002 | `RenewalWindowClosed` | Cooldown | `lib.rs`, `subscription.rs`, `test_auto_renew.rs` | The auto-renewal window has closed; cancel and recreate the subscription to resume billing. | — |
+| 12003 | `EmergencyWithdrawCooldownActive` | Cooldown | `subscription.rs`, `test_emergency_withdraw.rs` | Wait for the emergency-withdraw cooldown to elapse before requesting again. | — |
+| 12004 | `EmergencyWithdrawNotRequested` | Cooldown | `subscription.rs`, `test_emergency_withdraw.rs` | No open emergency-withdraw request exists, or it was already finalized. Request one first. | — |
+| 12005 | `EmergencyWithdrawStateChanged` | Cooldown | `subscription.rs`, `test_emergency_withdraw.rs` | Subscription state changed since the request; read current state and request a new emergency withdraw. | — |
+| 13001 | `DelegatedPayerGrantNotFound` | Delegated Payer | `subscription.rs`, `test_delegated_payer.rs` | Create a delegated-payer grant for this subscriber before depositing on their behalf. | — |
+| 13002 | `DelegatedPayerGrantExpired` | Delegated Payer | `subscription.rs`, `test_delegated_payer.rs` | Create a fresh delegated-payer grant; the existing one has expired. | — |
+| 13003 | `DelegatedPayerAmountExceeded` | Delegated Payer | `subscription.rs`, `test_delegated_payer.rs` | Reduce the deposit to at most the grant's max_amount, or raise the grant limit. | — |
+| 13004 | `EscrowNotFound` | Delegated Payer | `dispute.rs`, `lib.rs`, `test_cancellation_escrow.rs` | No cancellation escrow exists for this subscription; verify the subscription id. | — |
+| 13005 | `EscrowNotReleased` | Delegated Payer | `dispute.rs`, `lib.rs`, `subscription.rs`, `test_cancellation_escrow.rs` | Wait for the cancellation escrow release window to elapse before withdrawing. | — |
+| 14001 | `ProposalNotFound` | Admin Rotation | `admin.rs`, `test_admin_rotation_two_step.rs` | No admin proposal is active. Call propose_admin first. | — |
+| 14002 | `ProposalExpired` | Admin Rotation | `admin.rs`, `test_admin_rotation_two_step.rs` | The 7-day claim window elapsed; call propose_admin again to start a fresh proposal. | — |
+| 14003 | `InvalidClaimant` | Admin Rotation | `admin.rs`, `test_admin_rotation_two_step.rs` | Only the proposed new-admin address may call claim_admin_role. | — |
+| 14004 | `ProposalAlreadyExists` | Admin Rotation | `admin.rs`, `test_admin_rotation_two_step.rs`, `test_admin_transfer_auth.rs` | Cancel the active proposal with cancel_admin_proposal before proposing a different admin. | AdminProposalCancelledEvent |
+| 14005 | `NoActiveProposal` | Admin Rotation | `admin.rs`, `test_admin_rotation_two_step.rs` | There is no active proposal to cancel; nothing to roll back. | — |
+| 14006 | `ProposalCooldownActive` | Admin Rotation | `admin.rs`, `test_admin_rotation_two_step.rs` | Wait for the admin proposal cooldown to elapse before proposing again. | — |
+| 15001 | `MultiSigApprovalRequired` | Multi-Sig | — | This operation needs multi-sig approval; submit a proposal and gather the required signatures first. | MultiSigProposalCreatedEvent |
+| 15002 | `MultiSigProposalNotFound` | Multi-Sig | `admin.rs` | No valid multi-sig proposal matches this operation; create one first. | MultiSigProposalCreatedEvent |
+| 15003 | `MultiSigQuorumNotReached` | Multi-Sig | `admin.rs` | Collect more signatures until the threshold is met, then execute. | MultiSigProposalApprovedEvent |
+| 15004 | `MultiSigProposalExpired` | Multi-Sig | `admin.rs` | The multi-sig proposal expired; create a new proposal and re-collect signatures. | — |
 <!-- GENERATED:entrypoint-table:end -->
