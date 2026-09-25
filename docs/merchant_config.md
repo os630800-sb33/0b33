@@ -120,6 +120,89 @@ pub fn get_merchant_config(
 ) -> Option<MerchantConfig>
 ```
 
+## Field mutability while subscriptions are active
+
+Every field of `MerchantConfig` can be changed at any time by the merchant
+itself. `update_merchant_config` applies each `Some(..)` field independently
+and **performs no check on how many subscriptions the merchant currently has**.
+This section states, per field, what changing it actually affects, so a
+merchant does not discover the consequences by surprise.
+
+> **Known gap.** The issue for this section also asked that protected fields
+> return `Error::InvalidStatusTransition` when changed while active
+> subscriptions exist. **That guard does not exist in the contract today** —
+> `update_merchant_config` in `merchant.rs` validates field *shape* only
+> (`fee_bips <= MAX_FEE_BIPS`, `OP_CHARGE` must be set) and never inspects the
+> merchant's subscription set. It is documented here as a gap rather than
+> described as if it were enforced. See [Known gaps](#known-gaps).
+
+### Mutability matrix
+
+| Field | Mutable while active? | Effect of changing it mid-flight | Enforced today |
+|-------|:---------------------:|-----------------------------------|----------------|
+| `payout_address` | Yes | **Immediate and retroactive in effect.** All future payouts, and any not-yet-withdrawn `TokenEarnings`, go to the new address. Funds already withdrawn are unaffected. | No subscription guard |
+| `fee_bips` | Yes | **Applies to future charges only.** Already-executed statements and already-accrued `MerchantEarnings` keep the old rate. In-flight charges take the rate at execution time. | Range-checked: `> MAX_FEE_BIPS` → `InvalidFeeBips` |
+| `fee_address` | Yes | Fee share is paid to this address instead of the payout address going forward. `None` means "use `payout_address`". | No guard |
+| `allowed_operations` | Yes | Operation bitmap is read per operation. Clearing a bit blocks that operation from the next call onward. `CHARGE` **cannot** be cleared. | Validated: unknown bits → `InvalidOperations`; `CHARGE` unset → `MustAllowChargeOperation` |
+| `is_active` | Yes | Merchants can self-deactivate. Blocks new subscription creation for this merchant; does **not** stop existing subscriptions from being charged. | No guard |
+| `is_paused` | Yes | Blocks charges to this merchant's subscriptions, returning `Error::MerchantPaused`. Does not block withdrawal of already-earned funds. | No guard |
+| `redirect_url` | Yes | Off-chain checkout/redirect hint only. No on-chain financial effect. | No guard |
+| `version` | Not client-settable | Schema version, maintained by the contract. | Written internally |
+| `last_updated` | Not client-settable | Set to `env.ledger().timestamp()` on every successful update. | Written internally |
+
+### Which fields are economically significant
+
+Four fields change who gets money or whether money moves at all, and are the
+ones to treat as high-risk while subscriptions are live:
+
+| Field | Why it is sensitive | Safe pattern |
+|-------|--------------------|---------------|
+| `payout_address` | Redirects the entire payout stream. A compromised or mistyped address sends real funds to a third party, and there is no clawback. | Rotate only immediately after a key compromise, or after draining `TokenEarnings` to the old address. Verify the address on-chain before signing. |
+| `fee_address` | Same redirection risk for the fee share. | Same as `payout_address`. |
+| `fee_bips` | Changes merchant revenue on every future charge. Raising it while subscriptions are active retroactively worsens terms subscribers agreed to. | Announce before raising. Consider pausing new subscriptions first. |
+| `is_paused` | Halts all charges for the merchant. Use it to stop an active incident. | This is the intended incident control, and is safe: subscribers can still cancel and withdraw. |
+
+### Fields that are safe to change at any time
+
+`redirect_url` has no on-chain financial effect and `allowed_operations` only
+takes effect on the next operation, provided `CHARGE` is retained. Neither
+requires pausing.
+
+### Ordering rule for sensitive changes
+
+Because no field is blocked while subscriptions are active, the safe order for
+a `payout_address` rotation is:
+
+1. Optionally drain accrued earnings to the **old** address first, so the
+   change only redirects future accrual.
+2. `update_merchant_config(merchant, new_payout_address = Some(new), ..)`.
+3. Confirm the `merchant_config_updated` event and re-read `get_merchant_config`.
+
+Setting `is_paused = true` first is the conservative alternative: it halts new
+charges, lets you make the change without fresh money moving, and does not
+trap funds (withdrawals remain available).
+
+### Known gaps
+
+The following are **not** enforced by the contract and are recorded here so
+that integrators do not rely on behaviour that does not exist:
+
+1. **No active-subscription guard.** `update_merchant_config` does not check
+   the merchant's subscription count, so `payout_address`, `fee_address`,
+   `fee_bips`, and `is_active` can all be changed while charges are in flight.
+   `Error::InvalidStatusTransition` is **not** returned in any of these cases.
+2. **No `payout_address` history.** The previous payout address is not retained
+   on-chain; `MerchantConfigUpdatedEvent` only carries the *new* value. Off-chain
+   indexers are the sole record of the old address.
+3. **`is_active` vs `is_paused` are independent.** Setting `is_active = false`
+   does not pause existing subscriptions, and `is_paused = true` does not
+   deactivate the merchant. Both may need to be set to fully stop a merchant.
+
+Closing gap 1 would mean rejecting `update_merchant_config` when the merchant
+has any subscription in a non-terminal status. That is a behaviour change to a
+live, merchant-authorized entry point and needs its own review and test
+coverage rather than a documentation-only patch.
+
 ## Validation Functions
 
 ```rust
