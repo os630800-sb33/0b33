@@ -41,6 +41,21 @@
 //! | `set_merchant_multisig` | [`crate::merchant::set_merchant_multisig`] |
 //! | `get_merchant_multisig_config` | [`crate::merchant::get_merchant_multisig_config`] |
 //!
+//! ### Config mutability guard
+//!
+//! `update_merchant_config` is **not** an unconstrained field setter.
+//! `fee_bips` and `allowed_operations` are protected and require the merchant
+//! to have zero `Active` subscriptions; supplying either while live
+//! subscriptions exist returns `Error::InvalidStatusTransition` and writes
+//! nothing. The check and its rationale live with the delegate functions in
+//! [`crate::merchant`] (`count_active_subscriptions`,
+//! `reject_protected_field_change`); the per-field table is in
+//! `docs/merchant_config.md` → Field mutability.
+//!
+//! Note the ABI-stability rule above: this guard lives in `merchant.rs`, not
+//! here, because this module defines no entrypoints. Adding the check to this
+//! file would have no effect on the compiled contract.
+//!
 //! ## Pause / Unpause
 //! | Entrypoint | Delegate |
 //! |---|---|

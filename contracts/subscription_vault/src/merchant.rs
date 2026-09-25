@@ -37,6 +37,92 @@ use crate::types::{
 };
 use soroban_sdk::{token, Address, Env, String, Symbol, Vec};
 
+/// Upper bound on how many subscription ids `count_active_subscriptions` will
+/// inspect for a single merchant before giving up and failing closed.
+///
+/// The scan walks the merchant's own secondary index
+/// (`DataKey::MerchantSubs`), so its length is bounded in practice by the
+/// per-subscriber active-subscription cap. The cap exists so a pathological or
+/// corrupted index can never turn a config update into an unbounded read.
+const MAX_MERCHANT_ACTIVE_SCAN: u32 = 5_000;
+
+/// Count the merchant's subscriptions that are currently `Active`.
+///
+/// `Active` is the only status that matters for config mutability: it is the
+/// state in which a charge is *expected* to succeed at the next interval, so
+/// it is the state in which changing the charge economics retroactively bites
+/// an existing agreement. `GracePeriod` and `InsufficientBalance` are
+/// deliberately **not** counted — a merchant must be able to fix config for a
+/// subscriber who needs help, and those states are not billing normally.
+///
+/// Fails closed with [`Error::InvalidInput`] if the merchant's index is longer
+/// than [`MAX_MERCHANT_ACTIVE_SCAN`], so an oversized index blocks the update
+/// rather than silently permitting a protected-field change.
+pub fn count_active_subscriptions(env: &Env, merchant: &Address) -> Result<u32, Error> {
+    let key = DataKey::MerchantSubs(merchant.clone());
+    let ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+
+    if ids.len() > MAX_MERCHANT_ACTIVE_SCAN {
+        return Err(Error::InvalidInput);
+    }
+
+    let mut count = 0u32;
+    for id in ids.iter() {
+        if let Some(sub) = env
+            .storage()
+            .persistent()
+            .get::<_, crate::types::Subscription>(&DataKey::Sub(id))
+        {
+            if sub.status == crate::types::SubscriptionStatus::Active {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    Ok(count)
+}
+
+/// Reject an attempt to change a config field that is protected while the
+/// merchant has `Active` subscriptions.
+///
+/// # Protected fields
+///
+/// | Field | Why it is protected |
+/// |-------|---------------------|
+/// | `fee_bips` | Retroactively changes what already-active subscribers agreed to pay. A subscriber who signed up at 100 bps would be invoiced at the new rate with no new consent. |
+/// | `allowed_operations` | Changes which operations the merchant's *existing* subscriptions may perform. Removing `OP_WITHDRAW` would strand merchant earnings behind subscriptions that can never release them. |
+///
+/// # Unprotected fields
+///
+/// `payout_address`, `fee_address`, `redirect_url`, `is_active` and `is_paused`
+/// stay freely mutable. They either redirect funds the merchant is already
+/// entitled to, or are the levers a merchant needs during an incident — in
+/// particular `is_paused` and `is_active` must never be blocked, because
+/// pausing an active merchant is exactly the action you need to be able to
+/// take while subscriptions are live.
+///
+/// Returns `Err(Error::InvalidStatusTransition)` when a protected field is
+/// present in the update **and** at least one subscription is `Active`. The
+/// error is reported before any field is written, so a rejected update is a
+/// total no-op.
+fn reject_protected_field_change(
+    env: &Env,
+    merchant: &Address,
+    fee_bips: &Option<i32>,
+    allowed_operations: &Option<i32>,
+) -> Result<(), Error> {
+    if fee_bips.is_none() && allowed_operations.is_none() {
+        return Ok(());
+    }
+    if count_active_subscriptions(env, merchant)? == 0 {
+        return Ok(());
+    }
+    Err(Error::InvalidStatusTransition)
+}
+
 pub fn get_merchant_paused(env: &Env, merchant: Address) -> bool {
     // Check both legacy Pause state and new Config state if they overlap
     if let Some(config) = get_merchant_config(env, merchant.clone()) {
@@ -1242,6 +1328,42 @@ pub fn do_flush_payouts(env: &Env, merchant: Address, caller: Address) -> Result
     Ok(tokens_paid)
 }
 
+/// Update a subset of the merchant's configuration fields.
+///
+/// Every argument is `Option`; `None` means "leave this field alone".
+///
+/// # Field mutability
+///
+/// | Field | Mutable while subscriptions are `Active`? |
+/// |-------|------------------------------------------|
+/// | `payout_address` | Yes |
+/// | `fee_bips` | **No** — see below |
+/// | `allowed_operations` | **No** — see below |
+/// | `is_active` | Yes |
+/// | `fee_address` | Yes |
+/// | `redirect_url` | Yes |
+/// | `is_paused` | Yes |
+///
+/// `fee_bips` and `allowed_operations` are **protected**: changing either
+/// while the merchant has at least one `Active` subscription returns
+/// `Error::InvalidStatusTransition` (code `4001`) and writes nothing. The
+/// rationale is consent, not convenience — those two fields change the terms
+/// of agreements subscribers entered while their subscriptions were running:
+/// a `fee_bips` change retroactively re-prices every live subscription, and
+/// clearing `OP_WITHDRAW` can strand merchant earnings behind subscriptions
+/// that can no longer release them.
+///
+/// Pause the subscriptions first, change the field, then resume. Only
+/// `Active` counts, so a merchant whose subscriptions are all `Paused`,
+/// `GracePeriod` or `Cancelled` can always change protected fields — which is
+/// precisely when it is safe to do so.
+///
+/// # Other errors
+///
+/// * `NotFound` — no config record for this merchant.
+/// * `InvalidFeeBips` — `fee_bips > MAX_FEE_BIPS`.
+/// * `InvalidOperations` — unknown bits in `allowed_operations`.
+/// * `MustAllowChargeOperation` — `OP_CHARGE` cleared from `allowed_operations`.
 pub fn update_merchant_config(
     env: &Env,
     merchant: Address,
@@ -1257,6 +1379,9 @@ pub fn update_merchant_config(
 
     let key = DataKey::MerchantConfig(merchant.clone());
     let mut config: MerchantConfig = env.storage().instance().get(&key).ok_or(Error::NotFound)?;
+
+    // Protected-field guard. Runs before any write so a rejection is a no-op.
+    reject_protected_field_change(env, &merchant, &new_fee_bips, &new_allowed_operations)?;
 
     if let Some(payout) = new_payout_address {
         config.payout_address = payout;
