@@ -19,6 +19,40 @@ Validation is performed by the single authoritative helper `validate_interval(in
 - `create_plan_template` / `create_plan_template_with_token`
 - `update_plan_template`
 
+### Relationship to Stellar ledger close time
+
+Stellar ledgers close roughly every **5 seconds** on mainnet, and the Soroban
+ledger timestamp is stamped **once per ledger**. This creates two separate
+concepts that are easy to conflate:
+
+| Concept | Value | Enforced by |
+|---------|-------|-------------|
+| Protocol-level floor — at least 1-2 ledger closes, so that `last_payment + interval` is representable as a distinct ledger timestamp | ~5-10 s | Stellar network |
+| Contract-enforced floor (`MIN_SUBSCRIPTION_INTERVAL_SECONDS`) | **60 s** (≈ 12 ledger closes) | `validate_interval` |
+
+The contract's floor is deliberately **stricter** than the protocol floor.
+Choosing 60 s rather than 10 s buys a wide margin against ledger timestamp
+jitter and equal-timestamp ledgers (see [Ledger time
+monotonicity](#ledger-time-monotonicity)) at negligible cost to real
+subscriptions, whose intervals are normally measured in days.
+
+### Warning: sub-minute intervals are rejected
+
+Any `interval_seconds` below 60 is rejected at creation with
+`Error::InvalidInput` (3002), and plan templates are validated identically.
+Practical consequences of this floor:
+
+- **Do not model intervals in seconds.** A "per-minute" subscription is not
+  expressible. Use the smallest interval the product actually needs —
+  realistically a day or more.
+- **Sub-minute periods cannot be charged at all.** Because the charge boundary
+  is `now >= last_payment + interval`, an interval shorter than one ledger
+  close would be unobservable: the ledger timestamp cannot advance finely
+  enough to distinguish the start of the period from its end.
+- **A rejected interval is not silently clamped.** Passing 30 does not become
+  60; the call fails outright, so the merchant never believes it has a
+  subscription that the contract will not honour.
+
 ---
 
 ## Canonical time-math formula
