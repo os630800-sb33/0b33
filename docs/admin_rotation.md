@@ -80,6 +80,98 @@ pub fn rotate_admin(
 - Confirm with `get_admin()`.
 - Monitor `admin_rotated` events for audit and indexing.
 
+## Two-Step Rotation and Rollback
+
+`rotate_admin` (above) is **instant and irreversible**: the admin changes in the
+same transaction, and if `new_admin` was wrong or its keys are compromised,
+there is no way back — the old admin has already lost every privilege.
+
+**For any non-emergency rotation, use the two-step flow instead.** It exists
+precisely to make the dangerous window recoverable.
+
+| Step | Call | Who signs |
+|------|------|-----------|
+| 1. Propose | `propose_admin(current_admin, new_admin)` | current admin |
+| 2. — | *waiting period; nothing changes on-chain yet* | — |
+| 3. Accept | `claim_admin_role(claimant)` | **new** admin |
+| — or — | | |
+| 3'. Roll back | `cancel_admin_proposal(admin)` | current admin |
+
+```rust
+pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address)
+    -> Result<(), Error>;
+
+pub fn claim_admin_role(env: Env, claimant: Address) -> Result<(), Error>;
+
+pub fn cancel_admin_proposal(env: Env, admin: Address) -> Result<(), Error>;
+
+pub fn get_admin_proposal(env: Env) -> Option<AdminProposal>;
+```
+
+The current admin stays fully privileged for the whole waiting period. Nothing
+is transferred until the *proposed* address calls `claim_admin_role`.
+
+### Rollback: cancelling an unaccepted proposal
+
+**This is the answer to "the new admin key is compromised before acceptance".**
+The cancellation function exists and is admin-only:
+
+```rust
+pub fn cancel_admin_proposal(env: Env, admin: Address) -> Result<(), Error>
+```
+
+Behaviour:
+
+- Requires `admin == stored admin` (the **current** admin), otherwise
+  `Error::Unauthorized`. The compromised proposed address cannot cancel — and
+  does not need to.
+- Fails with `Error::NoActiveProposal` if there is no pending proposal.
+- Removes the proposal from instance storage.
+- Emits `AdminProposalCancelledEvent { admin, timestamp }`.
+- **Does not change the admin.** `DataKey::Admin` is untouched, so the current
+  admin keeps every privilege and no rotation has occurred.
+
+Procedure:
+
+1. Confirm a proposal is pending:
+   `get_admin_proposal()` returns `Some(proposal)` and
+   `proposal.new_admin` is the address you intend to reject.
+2. Call `cancel_admin_proposal(admin)` as the current admin.
+3. Confirm `get_admin_proposal()` now returns `None`.
+4. Verify `get_admin()` is unchanged and the `admin_proposal_cancelled` event
+   is indexed.
+5. Re-propose to the correct address with `propose_admin`. Because the old
+   proposal is gone, the new `AdminProposal` is clean.
+
+### Rollback matrix
+
+| Situation | Rollback available? | Action |
+|-----------|--------------------|--------|
+| Proposal pending, new key compromised or mistyped | ✅ Yes | `cancel_admin_proposal` as current admin, then re-propose |
+| Proposal pending, you want to abort for any reason | ✅ Yes | `cancel_admin_proposal` |
+| Proposal pending, proposal window expired (7 days) | ✅ Yes (passive) | Nothing to cancel; the stale proposal is cleared when a claim is attempted and fails. `propose_admin` again |
+| Proposal **already claimed** | ❌ **No** | Irreversible. Only remedy is another rotation, which requires the **new** admin to call `propose_admin` |
+| Both old and new keys lost | ❌ **No** | See [`docs/runbooks/admin_rotation.md`](runbooks/admin_rotation.md#43-both-old-and-new-admin-keys-lost) |
+
+The asymmetry is the whole point: **the window between `propose_admin` and
+`claim_admin_role` is recoverable; the moment the claim succeeds, it is not.**
+Anyone who can author the claim can author the rotation, so a rotation to a
+compromised address is unrecoverable by design rather than by omission.
+
+### Which path to use
+
+- **Planned rotation (routine key rotation, team handover):** two-step
+  `propose_admin` → `claim_admin_role`. You keep a rollback until acceptance.
+- **Compromised admin key, no time:** `rotate_admin` immediately. The instant
+  path is the correct emergency response; reachability beats reversibility.
+  See the full playbook in
+  [`docs/runbooks/admin_rotation.md`](runbooks/admin_rotation.md).
+
+> **Note on the naming.** This document previously stated that rotation is
+> unconditionally irreversible, which was accurate only for `rotate_admin`.
+> There is **no** function named `cancel_admin_rotation`; the cancellation
+> entry point is `cancel_admin_proposal`.
+
 ## Event Payload
 
 Every successful rotation emits an `AdminRotatedEvent` under the
@@ -138,8 +230,14 @@ This prevents:
 
 ### Irreversibility
 
-Rotation is **irreversible** without the new admin's cooperation. If the new
-admin's keys are lost, privileged operations cannot be performed.
+Applies to the **instant** `rotate_admin` path only. It is **irreversible**
+without the new admin's cooperation: if the new admin's keys are lost,
+privileged operations cannot be performed.
+
+The two-step `propose_admin` → `claim_admin_role` flow *is* reversible until
+the claim succeeds — see [Two-Step Rotation and
+Rollback](#two-step-rotation-and-rollback). A proposal can be cancelled by the
+current admin with `cancel_admin_proposal` at any time before it is accepted.
 
 ### No Grace Period
 
