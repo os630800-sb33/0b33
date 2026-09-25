@@ -557,6 +557,26 @@ pub(crate) fn execute_batch_charge(
     results
 }
 
+/// Charge a batch of subscriptions. Admin only.
+///
+/// # Input validation
+///
+/// Both argument-shape checks run *before* the nonce is consumed, so a
+/// malformed batch is a total no-op: no state is mutated and the caller's
+/// nonce is still valid for a corrected retry.
+///
+/// 1. **Batch length** — at most [`BATCH_MAX_SIZE`] ids. Larger batches are
+///    rejected with [`Error::InvalidInput`]. This is a contract-level guard,
+///    not a network one: without it an oversized batch would run past the
+///    Soroban per-transaction instruction limit and fail with a generic
+///    execution error that the caller cannot distinguish from out-of-gas.
+///    Oversized batches are rejected wholesale — there are no partial results.
+/// 2. **Duplicate ids** — a repeated id is rejected with
+///    [`Error::InvalidInput`], matching the size check. The size check runs
+///    first so an oversized batch is reported as oversized.
+///
+/// An empty batch is an explicit no-op that returns an empty result vector
+/// without consuming the nonce.
 pub fn do_batch_charge(
     env: &Env,
     subscription_ids: &Vec<u32>,
@@ -564,12 +584,14 @@ pub fn do_batch_charge(
 ) -> Result<Vec<BatchChargeResult>, Error> {
     let admin = require_stored_admin_auth(env)?;
 
-    // Validate batch size before processing
+    // Validate batch size before processing. Reported as InvalidInput so the
+    // caller can distinguish "this input shape is rejected" from an item-level
+    // charge failure, and so it cannot be confused with a network-level
+    // instruction-budget abort.
     if subscription_ids.len() > BATCH_MAX_SIZE {
-        return Err(Error::BatchTooLarge);
+        return Err(Error::InvalidInput);
     }
 
-    // Deduplicate subscription IDs to prevent double-charging
     // Empty batch is allowed as a no-op
     if subscription_ids.len() == 0 {
         return Ok(Vec::new(env));
