@@ -663,6 +663,7 @@ pub fn do_create_subscription_with_token(
         expires_at_ledger,
         sub_account_label,
         proration_enabled,
+        auto_pause_threshold: 0u32,
     };
 
     // Allocate ID with overflow / limit guard.
@@ -3389,6 +3390,7 @@ pub fn do_create_subscription_from_plan(
         expires_at_ledger: None,
         sub_account_label,
         proration_enabled: false,
+        auto_pause_threshold: 0u32,
     };
 
     write_subscription(env, id, &sub);
