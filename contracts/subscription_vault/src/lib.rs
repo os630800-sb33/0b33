@@ -54,6 +54,12 @@ mod validation;
 
 pub use admin::CONFIG_COOLDOWN_SECS;
 pub use safe_math::*;
+// Re-export pure helpers needed by Kani harnesses.  Gated so they are not
+// part of the normal ABI or WASM build.
+#[cfg(any(kani, feature = "kani_harness"))]
+pub use subscription::next_charge_time;
+#[cfg(any(kani, feature = "kani_harness"))]
+pub use nonce::compute_next_nonce;
 pub use types::{
     CancellationEscrow, CancellationEscrowDisputedEvent, CancellationEscrowOpenedEvent,
     CancellationEscrowReleasedEvent,
@@ -3470,3 +3476,32 @@ impl SubscriptionVault {
         Ok(current)
     }
 }
+
+// ── Kani formal-verification harnesses ───────────────────────────────────────
+//
+// These modules are only compiled when running `cargo kani` (or when the
+// `kani_harness` feature is enabled for IDE / compile-check purposes).
+// They live under `verification/` to keep them separate from production code.
+//
+// To run all harnesses:    make verify
+// To compile-check only:   make check
+
+#[cfg(any(kani, feature = "kani_harness"))]
+#[path = "../verification/balance_non_negativity.rs"]
+mod balance_non_negativity;
+
+#[cfg(any(kani, feature = "kani_harness"))]
+#[path = "../verification/interval_elapsed.rs"]
+mod interval_elapsed;
+
+#[cfg(any(kani, feature = "kani_harness"))]
+#[path = "../verification/auth_enforcement.rs"]
+mod auth_enforcement;
+
+#[cfg(any(kani, feature = "kani_harness"))]
+#[path = "../verification/safe_math_verification.rs"]
+mod safe_math_verification;
+
+#[cfg(any(kani, feature = "kani_harness"))]
+#[path = "../verification/nonce_verification.rs"]
+mod nonce_verification;
