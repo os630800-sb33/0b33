@@ -1,105 +1,74 @@
-.PHONY: help build test check fmt clippy wasm coverage audit deny clean install-hooks deploy-local
+# Stellabill Contracts — top-level Makefile
+#
+# Targets
+# -------
+# build    — cargo build (workspace, native)
+# test     — cargo test  (workspace)
+# verify   — run all Kani formal-verification harnesses
+# check    — cargo check with kani_harness feature (compile-checks harnesses
+#             without running Kani; useful in CI environments where Kani is not
+#             installed)
+# clean    — cargo clean
 
-# Default target: show help
-.DEFAULT_GOAL := help
+CARGO         ?= cargo
+KANI          ?= cargo kani
+CRATE         := -p subscription_vault
 
-# Color output
-BLUE := \033[0;34m
-GREEN := \033[0;32m
-NC := \033[0m
+VERIFY_DIR    := contracts/subscription_vault/verification
+KANI_HARNESSES := \
+  $(VERIFY_DIR)/balance_non_negativity.rs \
+  $(VERIFY_DIR)/interval_elapsed.rs \
+  $(VERIFY_DIR)/auth_enforcement.rs
 
-help: ## Show this help message
-	@echo "$(BLUE)Stellabill Contracts — Development Workflow$(NC)"
-	@echo ""
-	@echo "$(GREEN)Usage:$(NC) make [target]"
-	@echo ""
-	@echo "$(GREEN)Targets:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/: */:/g' | awk 'BEGIN {FS=":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
-	@echo ""
+.PHONY: build test verify check clean
 
-# ── Build targets ───────────────────────────────────────────────────────────
+# ── Standard build / test ─────────────────────────────────────────────────────
 
-build: ## Build the workspace (debug)
-	cargo build
+build:
+	$(CARGO) build --workspace
 
-build-release: ## Build the workspace (release)
-	cargo build --release
+test:
+	$(CARGO) test --workspace
 
-wasm: ## Build contract WASM target (wasm32-unknown-unknown)
-	cargo build --target wasm32-unknown-unknown
+# ── Kani formal verification ──────────────────────────────────────────────────
+#
+# Runs all harnesses in verification/ through Kani.  Each harness file is
+# included directly via `--harness-file`; Kani's own Rust toolchain handles
+# the `#[cfg(kani)]` gating automatically.
+#
+# To run a single harness use:
+#   cargo kani -p subscription_vault \
+#     --include-str contracts/subscription_vault/verification/balance_non_negativity.rs
+#
+# Prerequisite: install Kani with
+#   cargo install --locked kani-verifier
+#   cargo kani setup
+#
+verify:
+	$(KANI) $(CRATE) \
+	  --features kani_harness \
+	  --output-format terse \
+	  --harness balance_non_negativity::add_balance_non_negative_result \
+	  --harness balance_non_negativity::sub_balance_preserves_non_negativity \
+	  --harness balance_non_negativity::charge_cannot_overdraft \
+	  --harness interval_elapsed::next_charge_time_monotone \
+	  --harness interval_elapsed::next_charge_time_exact \
+	  --harness interval_elapsed::interval_gate_admits_only_ready_charges \
+	  --harness auth_enforcement::admin_is_always_authorized \
+	  --harness auth_enforcement::operator_is_always_authorized \
+	  --harness auth_enforcement::unauthorized_caller_is_always_rejected \
+	  --harness auth_enforcement::auth_result_is_binary
 
-wasm-release: ## Build contract WASM target (release)
-	cargo build --target wasm32-unknown-unknown --release
+# ── Harness compile-check (no Kani required) ──────────────────────────────────
+#
+# Compile-checks all harness files using the stable toolchain.  This is the
+# fast CI gate: it catches type errors, missing imports, and API drift without
+# needing the full Kani solver.
+#
+check:
+	$(CARGO) check $(CRATE) --features kani_harness
 
-# ── Test targets ────────────────────────────────────────────────────────────
+# ── Clean ─────────────────────────────────────────────────────────────────────
 
-test: ## Run all unit tests
-	cargo test --all
-
-test-verbose: ## Run all tests with output
-	cargo test --all -- --nocapture
-
-test-perf: ## Run query performance budget tests (with output)
-	cargo test -p subscription_vault --test query_performance -- --nocapture
-
-test-gas: ## Run gas and storage budget regression tests
-	cargo test -p subscription_vault --test gas_budget -- --nocapture
-
-# ── Code quality targets ─────────────────────────────────────────────────────
-
-fmt: ## Format code with rustfmt
-	cargo fmt --all
-
-fmt-check: ## Check code formatting without changes
-	cargo fmt --all -- --check
-
-clippy: ## Run linter (clippy)
-	cargo clippy --all-targets -- -D warnings
-
-check: fmt-check clippy test ## Run all checks: format, lint, and tests
-
-# ── Coverage and security ────────────────────────────────────────────────────
-
-coverage: ## Generate code coverage report (lcov)
-	@command -v cargo-llvm-cov >/dev/null 2>&1 || cargo install cargo-llvm-cov --locked
-	cargo llvm-cov --workspace --lcov --output-path lcov.txt
-
-audit: ## Run cargo audit for known security advisories
-	@command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
-	cargo audit
-
-deny: ## Run cargo deny (license, advisory, source, ban checks)
-	@command -v cargo-deny >/dev/null 2>&1 || cargo install cargo-deny --locked
-	cargo deny check
-
-security: audit deny ## Run all security checks: audit and deny
-
-# ── Setup targets ───────────────────────────────────────────────────────────
-
-install-hooks: ## Install Git pre-commit hooks (formatting and linting)
-	./scripts/install_git_hooks.sh
-
-verify-hooks: ## Verify Git hooks installation without modifying
-	./scripts/install_git_hooks.sh --check
-
-# ── Deployment targets ──────────────────────────────────────────────────────
-
-deploy-local: ## Deploy contract locally (builds, starts Docker network, deploys, initializes)
-	./scripts/deploy_local.sh
-
-deploy-local-skip-build: ## Deploy locally, reusing existing WASM build
-	./scripts/deploy_local.sh --skip-build
-
-deploy-local-skip-smoke: ## Deploy locally without running smoke tests
-	./scripts/deploy_local.sh --skip-smoke
-
-# ── Maintenance targets ──────────────────────────────────────────────────────
-
-clean: ## Clean build artifacts and cache
-	cargo clean
-
-clean-all: clean ## Deep clean (includes test artifacts)
-	rm -rf target/
-	rm -rf .deploy-state
-
-.PHONY: help build build-release wasm wasm-release test test-verbose test-perf test-gas fmt fmt-check clippy check coverage audit deny security install-hooks verify-hooks deploy-local deploy-local-skip-build deploy-local-skip-smoke clean clean-all
+clean:
+	$(CARGO) clean

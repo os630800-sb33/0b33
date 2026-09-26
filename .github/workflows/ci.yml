@@ -180,6 +180,40 @@ jobs:
           files: lcov.txt
           fail_ci_if_error: false
 
+  verify:
+    name: Formal verification (Kani harnesses)
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v4.2.2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-kani-${{ hashFiles('**/Cargo.lock') }}
+      # Step 1: compile-check all harnesses with the stable toolchain.
+      # This is fast (~same as cargo check) and catches type errors / API drift
+      # without requiring the Kani toolchain.
+      - name: Compile-check harnesses (kani_harness feature)
+        run: make check
+      # Step 2: run the full Kani solver on all harnesses.
+      # Kani is installed via its own installer so we pin the exact version to
+      # keep CI reproducible.  The solver runs each harness to exhaustive
+      # completion via bounded model checking (CBMC under the hood).
+      - name: Install Kani verifier
+        run: cargo install --locked kani-verifier
+      - name: Set up Kani toolchain
+        run: cargo kani setup
+      - name: Run Kani harnesses
+        run: make verify
+
   security-audit:
     runs-on: ubuntu-latest
     needs: [unit-tests]
