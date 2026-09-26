@@ -471,3 +471,33 @@ fn charge_subscription_to_sub_account_updates_earnings() {
     let earnings = client.get_merchant_token_earnings(&merchant, &token);
     assert_eq!(earnings.accruals.interval, 1000);
 }
+
+// ── Sub-Account Revocation ───────────────────────────────────────────────────
+
+#[test]
+fn revoked_sub_account_cannot_withdraw() {
+    let (env, client, admin, token) = setup();
+    let merchant = create_merchant(&client, &env);
+
+    let stellar = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    stellar.mint(&env.current_contract_address(), &1000);
+
+    let sales_label = label(&env, "sales");
+    client.register_sub_account(&merchant, &sales_label);
+    crate::merchant::credit_sub_account(&env, &merchant, &sales_label, &token, 500).unwrap();
+
+    // Verify sub-account has funds
+    assert_eq!(client.get_sub_account_balance(&merchant, &sales_label), 500);
+
+    // Enable whitelist mode and revoke the merchant
+    client.set_whitelist_mode(&admin, &true);
+    client.approve_merchant(&admin, &merchant);
+    client.revoke_merchant(&admin, &merchant);
+
+    // Sub-account withdrawal must now fail because parent merchant is revoked
+    let result = client.try_withdraw_sub_account_funds(&merchant, &sales_label, &token, &100);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+
+    // Balance should remain unchanged
+    assert_eq!(client.get_sub_account_balance(&merchant, &sales_label), 500);
+}

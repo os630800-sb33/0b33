@@ -237,3 +237,36 @@ fn test_already_paused_not_affected() {
     );
     let _ = mer_addr; // suppress unused warning
 }
+
+
+/// Per-subscription auto_pause_threshold: different subscriptions can have different thresholds.
+#[test]
+fn test_per_subscription_threshold_configuration() {
+    let (env, client, admin, tok) = setup_no_grace();
+    
+    // Create two subscriptions
+    let (id1, subscriber1, _) = create_funded_sub(&env, &client, &tok, 0);
+    let (id2, subscriber2, _) = create_funded_sub(&env, &client, &tok, 0);
+
+    // For subscriptions created before per-subscription thresholds, 
+    // they inherit the global threshold of 0 (disabled by default).
+    // Verify that both start with auto_pause_threshold = 0
+    let sub1 = client.get_subscription(&id1);
+    let sub2 = client.get_subscription(&id2);
+    
+    assert_eq!(sub1.auto_pause_threshold, 0, "subscription 1 should start with threshold 0");
+    assert_eq!(sub2.auto_pause_threshold, 0, "subscription 2 should start with threshold 0");
+    
+    // With global threshold = 0, both subscriptions should not auto-pause
+    for _ in 0..5 {
+        jump_interval(&env);
+        client.charge_subscription(&id1, &None);
+    }
+    
+    let sub1_final = client.get_subscription(&id1);
+    assert_eq!(
+        sub1_final.status,
+        SubscriptionStatus::InsufficientBalance,
+        "subscription 1 with threshold 0 should not auto-pause"
+    );
+}

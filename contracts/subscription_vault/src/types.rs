@@ -590,6 +590,11 @@ pub struct Subscription {
     /// When false (default), the first charge is always for the full amount regardless
     /// of when in the interval the subscription starts.
     pub proration_enabled: bool,
+    /// Threshold for automatic pausing after N consecutive failed charges (InsufficientBalance).
+    /// When set to 0 (default), auto-pause is disabled for this subscription.
+    /// When set to N > 0, the subscription is paused after N consecutive failures.
+    /// High-value subscriptions may use higher thresholds; low-value ones may use lower.
+    pub auto_pause_threshold: u32,
 }
 
 impl Subscription {
