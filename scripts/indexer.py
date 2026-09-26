@@ -36,6 +36,7 @@ def initialize_database(database: sqlite3.Connection) -> None:
             ledger_closed_at TEXT,
             contract_id TEXT NOT NULL,
             event_type TEXT NOT NULL,
+            subscription_id TEXT,
             paging_token TEXT,
             topic_json TEXT NOT NULL,
             value_json TEXT NOT NULL,
@@ -44,6 +45,17 @@ def initialize_database(database: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS events_ledger_idx ON events(ledger);
         CREATE INDEX IF NOT EXISTS events_type_idx ON events(event_type);
+        """
+    )
+    event_columns = {
+        row[1] for row in database.execute("PRAGMA table_info(events)")
+    }
+    if "subscription_id" not in event_columns:
+        database.execute("ALTER TABLE events ADD COLUMN subscription_id TEXT")
+    database.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_sub_event
+            ON events(subscription_id, event_type);
         CREATE TABLE IF NOT EXISTS indexer_state (
             name TEXT PRIMARY KEY,
             value TEXT NOT NULL
