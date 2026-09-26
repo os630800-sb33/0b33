@@ -19,6 +19,11 @@ Use `--once` for a single poll, which is useful for backfills and cron jobs. The
 indexer resumes from `indexer_state.last_ledger` and can safely be restarted: event
 IDs are the primary key, so replayed ledger ranges are ignored.
 
+The schema includes a composite index on `(subscription_id, event_type)` for
+subscription-scoped event queries. The reference capture path preserves raw RPC
+topics rather than decoding subscription IDs, so populate `subscription_id` in a
+projection before relying on this index for those queries.
+
 ## Inspect events
 
 The `topic_json` and `value_json` columns contain the RPC response values, including
