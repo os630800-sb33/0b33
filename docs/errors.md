@@ -66,8 +66,15 @@ This document defines the canonical error taxonomy for `subscription_vault` and 
 | 6009 | `UsageCapExceeded` | Limits | Usage cap would be exceeded for the billing period. | Retry only after a new billing period or cap change. |
 | 6010 | `BurstLimitExceeded` | Limits | Usage call arrived too soon after prior call. | Retry after the minimum interval elapses. |
 | 6021 | `MerchantTagLimitExceeded` | Limits | Requested merchant tag set exceeds `MAX_MERCHANT_TAGS`. | Reduce the tag list and retry. |
+| 7001 | `InvalidFeeBips` | Merchant config | Fee basis points exceed the maximum allowed value (10 000). | Fix `fee_bips` to be in range [0, 10000] and retry. |
+| 7002 | `InvalidOperations` | Merchant config | Allowed-operations bitmask contains invalid `OP_*` bits. | Fix `allowed_operations` to use only valid `OP_*` bits and retry. |
+| 7003 | `MustAllowChargeOperation` | Merchant config | The `OP_CHARGE` bit is not set; merchants must accept charges. | Set the `OP_CHARGE` bit in `allowed_operations` and retry. |
+| 7004 | `MerchantNotApproved` | Merchant config | Merchant is not approved under whitelist mode. | Request approval from the admin or disable whitelist mode. |
 | 7005 | `UnknownMerchantTag` | Merchant config | Tag is not present in the admin-controlled tag allowlist. | Fix input; use only tags returned by `get_tag_allowlist`. |
 | 7006 | `DuplicateMerchantTag` | Merchant config | The same tag appears more than once in one `set_merchant_tags`/`set_tag_allowlist` call. | Remove the repeated tag and retry. |
+| 9001 | `CannotChangeUsageMode` | Subscription update | Attempting to toggle usage_enabled on an existing subscription. | Cannot toggle usage_enabled on an existing subscription; create a new one. |
+| 9101 | `SchemaMigrationDowngrade` | Schema migration | Stored schema version is newer than the binary. | Downgrade rejected; deploy the correct binary version. |
+| 9102 | `SchemaVersionMismatch` | Schema migration | Stored schema version does not match expected version. | Migration rejected; deploy compatible binary. |
 | 10001 | `DisputeNotFound` | Not found | No dispute for the given ID. | Verify dispute ID. |
 | 10002 | `DisputeAlreadyResolved` | State transition | Dispute has already been resolved. | Do not retry; inspect resolution. |
 | 10003 | `DisputeNotResponded` | State transition | Cannot resolve an unresponded dispute before window elapses. | Retry after admin responds or window elapses. |
