@@ -129,6 +129,198 @@ fn test_recovery_amount_validation() {
     assert_eq!(result, Err(Ok(Error::InsufficientBalance)));
 }
 
+/// Boundary: `recovery_amount == recoverable`, i.e. the admin sweeps the
+/// *entire* unaccounted surplus in one call.
+///
+/// Every other recovery test uses a strict partial amount, so the suite never
+/// observes the post-transfer state where `contract_balance == total_accounted`
+/// (`recoverable == 0`). That boundary is worth pinning down because:
+///
+/// * the guard is `amount > recoverable`, so equality must be *accepted* —
+///   an off-by-one here would strand the last unit of recoverable funds
+///   permanently;
+/// * the transfer leaves the contract with a zero token balance, which is the
+///   state a zero-balance invariant check has to tolerate rather than reject.
+///
+/// With no subscriptions and 100 USDC minted straight to the contract,
+/// `total_accounted` is 0, so the whole 100 USDC is recoverable and a single
+/// exact-amount recovery drains the contract to zero.
+#[test]
+fn test_recovery_exact_balance_drains_contract_to_zero() {
+    let (env, client, token_addr, admin) = setup_env();
+    let recipient = Address::generate(&env);
+    let token_client = token::StellarAssetClient::new(&env, &token_addr);
+    let balance_client = token::Client::new(&env, &token_addr);
+
+    let stranded = 100_000_000i128; // 100 USDC, no subscriptions
+    token_client.mint(&client.address, &stranded);
+
+    // The full balance is recoverable, and nothing is accounted for.
+    let before = client.get_token_reconciliation(&token_addr);
+    assert_eq!(before.contract_balance, stranded);
+    assert_eq!(before.total_prepaid, 0);
+    assert_eq!(before.recoverable_amount, stranded);
+
+    // Amount 1 more than recoverable is rejected — the boundary is exact.
+    let rec_over = String::from_str(&env, "rec_exact_over");
+    let over = client.try_recover_stranded_funds(
+        &admin,
+        &token_addr,
+        &recipient,
+        &(stranded + 1),
+        &rec_over,
+        &RecoveryReason::UserOverpayment,
+    );
+    assert_eq!(over, Err(Ok(Error::InsufficientBalance)));
+    assert_eq!(balance_client.balance(&client.address), stranded);
+
+    // Exactly the recoverable balance is accepted and zeroes the contract.
+    let rec_exact = String::from_str(&env, "rec_exact_full");
+    client.recover_stranded_funds(
+        &admin,
+        &token_addr,
+        &recipient,
+        &stranded,
+        &rec_exact,
+        &RecoveryReason::UserOverpayment,
+    );
+
+    assert_eq!(balance_client.balance(&client.address), 0, "full-drain recovery must leave the contract at zero balance");
+    assert_eq!(balance_client.balance(&recipient), stranded, "recipient must receive the entire recovered amount");
+
+    // Zero surplus is still a *balanced* vault, not a broken one: the
+    // reconciliation identity holds with every component at zero.
+    let after = client.get_token_reconciliation(&token_addr);
+    assert_eq!(after.contract_balance, 0);
+    assert_eq!(after.total_prepaid, 0);
+    assert_eq!(after.total_merchant_liabilities, 0);
+    assert_eq!(after.recoverable_amount, 0);
+    assert_eq!(after.computed_total, 0);
+    assert!(after.is_balanced, "an empty vault must still report is_balanced");
+
+    // Nothing is recoverable afterwards, so a second drain is rejected and
+    // leaves the zero balance untouched.
+    let rec_second = String::from_str(&env, "rec_exact_second");
+    let second = client.try_recover_stranded_funds(
+        &admin,
+        &token_addr,
+        &recipient,
+        &1,
+        &rec_second,
+        &RecoveryReason::UserOverpayment,
+    );
+    assert_eq!(second, Err(Ok(Error::InsufficientBalance)));
+    assert_eq!(balance_client.balance(&client.address), 0);
+    assert_eq!(balance_client.balance(&recipient), stranded);
+}
+
+/// Boundary: exact drain of the surplus *while subscriber funds are live*.
+///
+/// Recovering the full recoverable amount must not eat into `total_accounted`.
+/// Here the vault holds 50 USDC of prepaid subscriber funds plus 20 USDC of
+/// stranded funds, so the exact recoverable amount is 20 USDC — recovering it
+/// in full leaves `contract_balance == total_accounted`, with the subscription
+/// still fully funded and able to complete its normal lifecycle.
+#[test]
+fn test_recovery_exact_surplus_leaves_accounted_funds_intact() {
+    let (env, client, token_addr, admin) = setup_env();
+    let subscriber = Address::generate(&env);
+    let merchant = Address::generate(&env);
+    let admin_recipient = Address::generate(&env);
+    let token_client = token::StellarAssetClient::new(&env, &token_addr);
+    let balance_client = token::Client::new(&env, &token_addr);
+
+    // 50 USDC of accounted subscriber funds.
+    token_client.mint(&subscriber, &50_000_000);
+    let sub_id = client.create_subscription(
+        &subscriber,
+        &merchant,
+        &10_000_000,
+        &INTERVAL,
+        &false,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+        &None::<soroban_sdk::Symbol>,
+        &false,
+    );
+    client.deposit_funds(&sub_id, &50_000_000i128, &None::<u64>);
+
+    // 20 USDC of unaccounted stranded funds on top.
+    let surplus = 20_000_000i128;
+    token_client.mint(&client.address, &surplus);
+
+    let before = client.get_token_reconciliation(&token_addr);
+    assert_eq!(before.total_prepaid, 50_000_000);
+    assert_eq!(before.contract_balance, 70_000_000);
+    assert_eq!(before.recoverable_amount, surplus);
+    assert!(before.is_balanced);
+
+    // Drain the surplus exactly.
+    let rec_exact = String::from_str(&env, "rec_exact_surplus");
+    client.recover_stranded_funds(
+        &admin,
+        &token_addr,
+        &admin_recipient,
+        &surplus,
+        &rec_exact,
+        &RecoveryReason::UserOverpayment,
+    );
+
+    // Contract now holds exactly the accounted funds — no more, no less.
+    assert_eq!(balance_client.balance(&client.address), 50_000_000, "exact surplus drain must not touch accounted funds");
+    assert_eq!(balance_client.balance(&admin_recipient), surplus);
+
+    let after = client.get_token_reconciliation(&token_addr);
+    assert_eq!(after.recoverable_amount, 0, "surplus must be exhausted");
+    assert_eq!(after.total_prepaid, 50_000_000, "prepaid funds must be untouched");
+    assert_eq!(after.contract_balance, 50_000_000);
+    assert!(after.is_balanced, "balance identity must survive the exact drain");
+
+    // One more unit is not recoverable, but the subscription is still whole.
+    let rec_over = String::from_str(&env, "rec_exact_surplus_over");
+    let over = client.try_recover_stranded_funds(
+        &admin,
+        &token_addr,
+        &admin_recipient,
+        &1,
+        &rec_over,
+        &RecoveryReason::UserOverpayment,
+    );
+    assert_eq!(over, Err(Ok(Error::InsufficientBalance)));
+
+    // The subscription is still fully funded, so it charges normally after the
+    // exact drain: 10 USDC moves from prepaid into merchant liabilities and the
+    // vault still reports a balanced, zero-surplus reconciliation.
+    env.ledger().with_mut(|l| l.timestamp = INTERVAL + 1001);
+    client.charge_subscription(&sub_id, &None::<soroban_sdk::BytesN<32>>);
+    let charged = client.get_token_reconciliation(&token_addr);
+    assert_eq!(charged.total_prepaid, 40_000_000);
+    assert_eq!(charged.total_merchant_liabilities, 10_000_000);
+    assert_eq!(charged.recoverable_amount, 0);
+    assert_eq!(charged.contract_balance, 50_000_000);
+    assert!(charged.is_balanced);
+
+    // The accrued funds stay with the merchant, and the subscriber is refunded
+    // the remaining 40 USDC on cancellation. Every unit is accounted for, so the
+    // contract ends at exactly zero.
+    client.withdraw_merchant_funds(&merchant, &10_000_000);
+    client.cancel_subscription(&sub_id, &subscriber);
+    client.withdraw_subscriber_funds(&sub_id, &subscriber);
+
+    assert_eq!(balance_client.balance(&subscriber), 40_000_000, "subscriber must receive the unspent prepaid balance");
+    assert_eq!(balance_client.balance(&merchant), 10_000_000, "merchant must receive the charged amount");
+    assert_eq!(balance_client.balance(&admin_recipient), surplus, "recovery must not be re-taken from the subscriber's funds");
+    assert_eq!(balance_client.balance(&client.address), 0, "no tokens may remain after all accounted funds are paid out");
+
+    let final_state = client.get_token_reconciliation(&token_addr);
+    assert_eq!(final_state.contract_balance, 0);
+    assert_eq!(final_state.total_prepaid, 0);
+    assert_eq!(final_state.total_merchant_liabilities, 0);
+    assert_eq!(final_state.recoverable_amount, 0);
+    assert!(final_state.is_balanced);
+}
+
 #[test]
 fn test_recovery_replay_protection() {
     let (env, client, token_addr, admin) = setup_env();
