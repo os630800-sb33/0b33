@@ -93,6 +93,12 @@ Algorithm: Ed25519 / Curve25519
 All times are business days (UTC). If we cannot meet a deadline we will notify
 you with a revised estimate before the deadline passes.
 
+**Overall commitment:** regardless of severity, we commit to providing a
+substantive response to every valid report, including a confirmed assessment
+and either a remediation plan or a documented decision, within **90 days** of
+the initial report. This is the outer limit; the severity-based targets above
+apply where they are shorter.
+
 ---
 
 ## Coordinated Disclosure & Embargo
@@ -179,6 +185,8 @@ preserve evidence, and notify us so we can assess and mitigate impact.
 > then, we offer **discretionary rewards** based on severity and quality of
 > report, paid in USDC on Stellar.
 
+A link to the formal bug bounty program will be added here when it launches.
+
 | Severity | Indicative reward |
 |----------|-----------------|
 | **Critical** — direct loss of subscriber or merchant funds | Up to $20 000 |
@@ -205,3 +213,4 @@ handle, or anonymously) will be listed here after disclosure.
 | Date | Change |
 |------|--------|
 | 2026-07-30 | Initial policy — issue #856 |
+| 2026-10-22 | Added overall 90-day response commitment and bounty program link note — issue #461 |
