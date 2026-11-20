@@ -9,7 +9,7 @@ Storage reads are the primary driver of execution costs in Soroban. The followin
 | Endpoint | Read Complexity | Guardrail | Notes |
 |---|---|---|---|
 | `get_subscription` | O(1) | None | Direct persistent storage lookup. |
-| `get_subscriptions_by_merchant` | O(N) | `MAX_SUBSCRIPTION_LIST_PAGE` (100) | Reads full merchant index `Vec<u32>` + up to `limit` records. `reverse = true` (newest-first) has identical complexity: the index is walked from its end, never inverted. |
+| `get_subscriptions_by_merchant` | O(N) | `MAX_SUBSCRIPTION_LIST_PAGE` (100) | Reads and deserializes the merchant index from persistent storage plus up to `limit` records. `reverse = true` (newest-first) has identical complexity: the index is walked from its end, never inverted. |
 | `list_subscriptions_by_merchant` | O(N) | `MAX_SUBSCRIPTION_LIST_PAGE` (100) per call; `MAX_MERCHANT_CURSOR_DEPTH` (1,000) total | Cursor-based variant of the above with the same forward/reverse cost symmetry. Chained traversal stops after 1,000 index entries. |
 | `get_subscriptions_by_token` | O(N) | `MAX_SUBSCRIPTION_LIST_PAGE` (100) | Reads full token index `Vec<u32>` + up to `limit` records. |
 | `list_subscriptions_by_token` | O(N) | `MAX_SUBSCRIPTION_LIST_PAGE` (100) per call | Cursor-based traversal over the token index; reads the full index + up to `limit` records per page. |

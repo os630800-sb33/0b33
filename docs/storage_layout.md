@@ -6,12 +6,12 @@ This document describes the subscription vault contract's storage layout, keys, 
 
 ## Storage Overview
 
-The contract uses Soroban's **instance storage** for global configurations and **persistent storage** for individual, unbounded subscription records. This hybrid strategy prevents instance footprint bloat and eliminates potential key collisions.
+The contract uses Soroban's **instance storage** for global configurations and **persistent storage** for subscription records and merchant subscription indexes. This hybrid strategy prevents instance footprint bloat and eliminates potential key collisions.
 
 ### Storage Types
 
 - **Instance Storage**: Global configuration data (Admin, Token, MinTopup, NextId, etc.) uses `env.storage().instance()`.
-- **Persistent Storage**: All individual subscription records use `env.storage().persistent()`, keyed under the typed `DataKey::Sub(u32)` enum.
+- **Persistent Storage**: Individual subscription records use `DataKey::Sub(u32)`. Merchant subscription indexes use `DataKey::MerchantSubs(Address)`; a pre-existing instance-storage index is copied to persistent storage and removed on first access.
 - **Persistence**: Data survives contract upgrades and has appropriate TTL settings for on-chain storage.
 - **Access Pattern**: Key-value store with typed keys and values.
 
@@ -76,6 +76,8 @@ pub enum SubscriptionStatus {
 - Delete: Not implemented (cancelled subscriptions remain in persistent storage)
 
 **TTL behavior:** Subscription entries are kept alive on every record read and write. This includes single-subscription queries and list/reconciliation queries that load subscription records; the subscriber index query that returns only IDs does not load or refresh the corresponding records. Billing statement secondary index entries and billing period snapshots also carry their own TTL thresholds (`BILLING_STATEMENT_TTL_THRESHOLD`, `BILLING_STATEMENT_TTL_EXTEND_TO`, `BILLING_PERIOD_SNAPSHOT_TTL_THRESHOLD`, `BILLING_PERIOD_SNAPSHOT_TTL_EXTEND_TO`) and are extended when the corresponding storage operations execute.
+
+Merchant subscription indexes use the subscription TTL thresholds as well. Index reads and writes refresh their TTL, and reading a subscription refreshes its merchant's persistent index so active records do not outlive their lookup index.
 
 #### TTL exhaustion semantics
 

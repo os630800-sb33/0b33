@@ -57,7 +57,7 @@ where CI runs.
 are deliberately excluded so an accidental instance write of a persistent key is
 caught:
 
-- **Instance (allowlisted):** `MerchantSubs, Token, Admin, MinTopup, NextId,
+- **Instance (allowlisted):** `MerchantSubs` (legacy migration read), `Token, Admin, MinTopup, NextId,
   SchemaVersion, EmergencyStop, MerchantPaused, TotalAccounted, MerchantConfig,
   MerchantEarnings, MerchantTokens, UsageLimits, UsageState, GracePeriod, FeeBps,
   Treasury, AcceptedTokens, TokenDecimals, NextPlanId, Plan, SubPlan,
