@@ -325,6 +325,16 @@ fn test_merchant_cursor_depth_is_bounded_and_exhausts_with_tombstone() {
     assert_eq!(last_page.subscriptions.len(), 50);
     assert_eq!(last_page.total, total);
     assert_eq!(last_page.next_cursor, None);
+    env.as_contract(&client.address, || {
+        let key = crate::types::DataKey::MerchantSubs(merchant.clone());
+        let stored_ids = env
+            .storage()
+            .persistent()
+            .get::<_, soroban_sdk::Vec<u32>>(&key)
+            .unwrap();
+        assert_eq!(stored_ids.len(), total);
+        assert!(!env.storage().instance().has(&key));
+    });
 
     let tombstone = client.list_subscriptions_by_merchant(
         &merchant,

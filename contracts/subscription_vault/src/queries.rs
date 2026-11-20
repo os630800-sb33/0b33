@@ -309,8 +309,7 @@ pub fn get_subscriptions_by_merchant(
     if limit == 0 || limit > MAX_SUBSCRIPTION_LIST_PAGE {
         return Err(Error::InvalidInput);
     }
-    let key = DataKey::MerchantSubs(merchant);
-    let ids: Vec<u32> = env.storage().instance().get(&key).unwrap_or(Vec::new(env));
+    let ids = crate::merchant::get_merchant_subscription_ids(env, &merchant);
 
     if start >= ids.len() {
         return Ok(Vec::new(env));
@@ -321,8 +320,7 @@ pub fn get_subscriptions_by_merchant(
 
 /// Returns the number of subscriptions for a given merchant.
 pub fn get_merchant_subscription_count(env: &Env, merchant: Address) -> u32 {
-    let key = DataKey::MerchantSubs(merchant);
-    let ids: Vec<u32> = env.storage().instance().get(&key).unwrap_or(Vec::new(env));
+    let ids = crate::merchant::get_merchant_subscription_ids(env, &merchant);
     ids.len()
 }
 
@@ -372,8 +370,7 @@ pub fn get_subscriptions_by_merchant_paginated(
         return Err(Error::InvalidInput);
     }
 
-    let key = DataKey::MerchantSubs(merchant);
-    let ids: Vec<u32> = env.storage().instance().get(&key).unwrap_or(Vec::new(env));
+    let ids = crate::merchant::get_merchant_subscription_ids(env, &merchant);
     let total = ids.len();
 
     let start = cursor.unwrap_or(0);

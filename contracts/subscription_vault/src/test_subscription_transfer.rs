@@ -55,6 +55,35 @@ fn test_happy_path_transfer() {
 }
 
 #[test]
+fn test_transfer_to_blocklisted_subscriber_is_rejected() {
+    let (env, client, admin, token, merchant, sub1, sub2) = setup();
+    let sub_id = client.create_subscription_with_token(
+        &sub1,
+        &merchant,
+        &token,
+        &10_000,
+        &86400,
+        &false,
+        &None,
+        &None,
+    );
+
+    let expires_at = env.ledger().timestamp() + 3600;
+    client.initiate_transfer(&sub_id, &sub1, &sub2, &expires_at);
+    client.add_to_blocklist(&admin, &sub2, &None);
+
+    assert_eq!(
+        client.try_accept_transfer(&sub_id, &sub2),
+        Err(Ok(Error::SubscriberBlocklisted))
+    );
+    assert_eq!(client.get_subscription(&sub_id).subscriber, sub1);
+
+    client.remove_from_blocklist(&admin, &sub2);
+    client.accept_transfer(&sub_id, &sub2);
+    assert_eq!(client.get_subscription(&sub_id).subscriber, sub2);
+}
+
+#[test]
 fn test_active_transfer_respects_new_subscriber_cap_and_moves_count() {
     let (env, client, admin, token, merchant, sub1, sub2) = setup();
     let incoming_id = client.create_subscription_with_token(

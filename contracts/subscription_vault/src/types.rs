@@ -202,7 +202,8 @@ pub enum KycKey {
 #[contracttype(export = false)]
 #[derive(Clone)]
 pub enum DataKey {
-    /// Maps a merchant address to its list of subscription IDs. Discriminant 0.
+    /// Legacy instance-storage key for a merchant's subscription IDs; current
+    /// values are stored persistently under the same key. Discriminant 0.
     MerchantSubs(Address),
     /// USDC token contract address. Discriminant 1.
     Token,

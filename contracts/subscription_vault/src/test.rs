@@ -4243,6 +4243,33 @@ fn test_charge_usage_basic() {
 }
 
 #[test]
+fn test_charge_usage_rejects_blocklisted_subscriber() {
+    let test_env = TestEnv::default();
+    let subscriber = Address::generate(&test_env.env);
+    let merchant = Address::generate(&test_env.env);
+    let id = test_env.client.create_subscription(
+        &subscriber,
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &true,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+    );
+    fixtures::seed_balance(&test_env.env, &test_env.client, id, PREPAID);
+    test_env
+        .client
+        .add_to_blocklist(&test_env.admin, &subscriber, &None::<String>);
+
+    assert_eq!(
+        test_env.client.try_charge_usage(&id, &1_000_000),
+        Err(Ok(Error::SubscriberBlocklisted))
+    );
+    assertions::assert_prepaid_balance(&test_env.client, &id, PREPAID);
+}
+
+#[test]
 fn test_charge_usage_fee_overflow_returns_error() {
     let test_env = TestEnv::default();
     let treasury = Address::generate(&test_env.env);

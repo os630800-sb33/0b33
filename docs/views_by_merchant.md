@@ -132,9 +132,9 @@ total_pages = ceil(count / limit)
 
 ## Performance notes
 
-- **Index storage:** Each merchant has a `Vec<u32>` of subscription IDs stored under `DataKey::MerchantSubs(merchant)`. The index is maintained automatically when subscriptions are created.
+- **Index storage:** Each merchant has a `Vec<u32>` of subscription IDs stored persistently under `DataKey::MerchantSubs(merchant)`. Existing instance-storage values are migrated to persistent storage on first access. The index is maintained automatically when subscriptions are created.
 - **Ordering:** Results are in chronological (insertion) order by default; pass `reverse = true` for reverse-chronological (newest-first) results. Reverse pages cost the same as forward pages because the index is walked from its end rather than inverted.
-- **Cost:** Reading is proportional to the `limit` value, not the total number of merchant subscriptions (the ID list is loaded, but only the requested slice of subscriptions is fetched from storage).
+- **Cost:** The merchant ID index is loaded for each page, while only the requested slice of subscription records is fetched from storage. The paginated response avoids returning all subscription records at once, but index deserialization remains proportional to the merchant's index size.
 - **Best practice:** Use small `limit` values (10–50) for UI pagination to keep transaction budgets low.
 
 ---
