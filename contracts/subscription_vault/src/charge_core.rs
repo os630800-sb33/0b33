@@ -217,6 +217,19 @@ pub fn charge_one(
     let mut sub = get_subscription(env, subscription_id)
         .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
 
+    // Guard: a zero interval makes next_charge_time == last_charged_at, which
+    // causes IntervalNotElapsed to never trigger and allows the subscription to
+    // be charged on every ledger. Reject it here before any interval arithmetic.
+    if sub.interval_seconds == 0 {
+        return Err(charge_fail(
+            env,
+            subscription_id,
+            Error::InvalidInput,
+            0,
+            now,
+        ));
+    }
+
     // Merchant pause/vacation status — cached per merchant within a batch so
     // subscriptions sharing a merchant don't each re-read the same storage.
     let (merchant_paused, merchant_in_vacation) = match merchant_cache.as_deref_mut() {

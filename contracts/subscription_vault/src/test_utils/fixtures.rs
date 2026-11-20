@@ -150,6 +150,8 @@ pub fn create_test_subscription_with_merchant(
 }
 
 /// Directly patch the status of a subscription in storage.
+/// Directly patch the status of a subscription in storage, bypassing state-machine validation.
+/// Useful for tests that need to exercise transitions without going through the full workflow.
 pub fn patch_status(
     env: &Env,
     client: &SubscriptionVaultClient,
@@ -159,6 +161,22 @@ pub fn patch_status(
     let mut sub = client.get_subscription(&id);
     sub.status = status;
     env.as_contract(&client.address, || {
+        env.storage().persistent().set(&DataKey::Sub(id), &sub);
+    });
+}
+
+/// Directly overwrite `interval_seconds` for a subscription in storage, bypassing
+/// create-time validation. Used by tests that need to exercise charge-time guards
+/// for values (e.g. 0) that the normal creation path rejects.
+#[allow(dead_code)]
+pub fn patch_interval(env: &Env, contract_id: &soroban_sdk::Address, id: u32, interval: u64) {
+    env.as_contract(contract_id, || {
+        let mut sub: crate::types::Subscription = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Sub(id))
+            .expect("subscription not found");
+        sub.interval_seconds = interval;
         env.storage().persistent().set(&DataKey::Sub(id), &sub);
     });
 }

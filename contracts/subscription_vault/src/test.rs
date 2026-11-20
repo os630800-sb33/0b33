@@ -1190,6 +1190,33 @@ fn test_charge_subscription_insufficient_balance_returns_error() {
     assert_eq!(result, Ok(Ok(ChargeExecutionResult::InsufficientBalance)));
 }
 
+#[test]
+fn test_charge_one_zero_interval_returns_invalid_input() {
+    // A subscription whose interval_seconds was somehow set to zero must be
+    // rejected with InvalidInput before any interval arithmetic runs.
+    // Without this guard, next_charge_time(last, 0) == last, so the
+    // IntervalNotElapsed check never fires and every ledger can charge the sub.
+    let test_env = TestEnv::default();
+    test_env.set_timestamp(T0);
+
+    let (id, _, _) = fixtures::create_subscription_detailed(
+        &test_env.env,
+        &test_env.client,
+        SubscriptionStatus::Active,
+        AMOUNT,
+        INTERVAL,
+    );
+    fixtures::seed_balance(&test_env.env, &test_env.client, id, PREPAID);
+
+    // Force interval_seconds to 0 directly in storage, bypassing create-time
+    // validation so we exercise the charge-time guard specifically.
+    fixtures::patch_interval(&test_env.env, &test_env.client.address, id, 0);
+
+    test_env.jump(1);
+    let result = test_env.client.try_charge_subscription(&id, &None::<soroban_sdk::BytesN<32>>);
+    assert_eq!(result, Err(Ok(Error::InvalidInput)));
+}
+
 // -- ID limit test ------------------------------------------------------------
 
 #[test]
@@ -4583,6 +4610,118 @@ fn test_list_subscriptions_by_subscriber_pagination_stable_ordering() {
     assert_eq!(page2.subscription_ids.get(0).unwrap(), expected[2]);
     assert_eq!(page2.subscription_ids.get(2).unwrap(), expected[4]);
     assert!(page2.next_start_id.is_none());
+}
+
+#[test]
+fn test_get_subscriptions_by_subscriber_returns_full_records() {
+    let test_env = TestEnv::default();
+    let subscriber = Address::generate(&test_env.env);
+    let merchant = Address::generate(&test_env.env);
+
+    let id1 = test_env.client.create_subscription(
+        &subscriber,
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &false,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+    );
+    let id2 = test_env.client.create_subscription(
+        &subscriber,
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &false,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+    );
+
+    let page = test_env
+        .client
+        .get_subscriptions_by_subscriber(&subscriber, &0, &10);
+    assert_eq!(page.len(), 2);
+    assert_eq!(page.get(0).unwrap().subscription_id, id1);
+    assert_eq!(page.get(1).unwrap().subscription_id, id2);
+    assert_eq!(page.get(0).unwrap().subscriber, subscriber);
+    assert_eq!(page.get(1).unwrap().subscriber, subscriber);
+}
+
+#[test]
+fn test_get_subscriptions_by_subscriber_offset_pagination() {
+    let test_env = TestEnv::default();
+    let subscriber = Address::generate(&test_env.env);
+    let merchant = Address::generate(&test_env.env);
+
+    let mut ids = alloc::vec::Vec::new();
+    for _ in 0..5 {
+        let id = test_env.client.create_subscription(
+            &subscriber,
+            &merchant,
+            &AMOUNT,
+            &INTERVAL,
+            &false,
+            &None::<i128>,
+            &None::<u64>,
+            &None::<u32>,
+        );
+        ids.push(id);
+    }
+
+    // First page: offset 0, limit 2
+    let page1 = test_env
+        .client
+        .get_subscriptions_by_subscriber(&subscriber, &0, &2);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap().subscription_id, ids[0]);
+    assert_eq!(page1.get(1).unwrap().subscription_id, ids[1]);
+
+    // Second page: offset 2, limit 10 — returns remaining 3
+    let page2 = test_env
+        .client
+        .get_subscriptions_by_subscriber(&subscriber, &2, &10);
+    assert_eq!(page2.len(), 3);
+    assert_eq!(page2.get(0).unwrap().subscription_id, ids[2]);
+    assert_eq!(page2.get(2).unwrap().subscription_id, ids[4]);
+
+    // Offset past end returns empty
+    let empty = test_env
+        .client
+        .get_subscriptions_by_subscriber(&subscriber, &5, &10);
+    assert_eq!(empty.len(), 0);
+}
+
+#[test]
+fn test_get_subscriptions_by_subscriber_invalid_limit_errors() {
+    let test_env = TestEnv::default();
+    let subscriber = Address::generate(&test_env.env);
+
+    // limit 0 is rejected
+    let res = test_env
+        .client
+        .try_get_subscriptions_by_subscriber(&subscriber, &0, &0u32);
+    assert!(matches!(res, Err(Ok(Error::InvalidInput))));
+
+    // limit above MAX_SUBSCRIPTION_LIST_PAGE is rejected
+    let res = test_env.client.try_get_subscriptions_by_subscriber(
+        &subscriber,
+        &0,
+        &(MAX_SUBSCRIPTION_LIST_PAGE + 1),
+    );
+    assert!(matches!(res, Err(Ok(Error::InvalidInput))));
+}
+
+#[test]
+fn test_get_subscriptions_by_subscriber_no_subscriptions_returns_empty() {
+    let test_env = TestEnv::default();
+    let subscriber = Address::generate(&test_env.env);
+
+    let result = test_env
+        .client
+        .get_subscriptions_by_subscriber(&subscriber, &0, &10);
+    assert_eq!(result.len(), 0);
 }
 
 #[test]

@@ -3250,6 +3250,20 @@ impl SubscriptionVault {
         crate::queries::list_subscriptions_by_subscriber(&env, subscriber, start_from_id, limit)
     }
 
+    /// Returns full subscription records for a subscriber with offset-based pagination.
+    ///
+    /// `offset` is a 0-based index into the subscriber's subscription list (insertion
+    /// order). `limit` must be in `1..=queries::MAX_SUBSCRIPTION_LIST_PAGE`.
+    /// Returns `InvalidInput` for an out-of-range limit.
+    pub fn get_subscriptions_by_subscriber(
+        env: Env,
+        subscriber: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<Subscription>, Error> {
+        queries::get_subscriptions_by_subscriber(&env, subscriber, offset, limit)
+    }
+
     /// List stranded subscriptions — those in `Cancelled` status that still hold a
     /// non-zero `prepaid_balance` — so admin tooling can surface them without a
     /// full chain scan (issue #438).
