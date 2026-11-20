@@ -1139,9 +1139,13 @@ pub fn get_buyout_premium_bps(env: &Env) -> u32 {
 }
 
 /// Set the auto-pause threshold (number of consecutive InsufficientBalance failures
-/// before a subscription is automatically paused). `0` disables auto-pause.
+/// before a subscription is automatically paused). The minimum valid threshold is
+/// `1`; `0` is rejected because it would pause every subscription immediately.
 pub fn do_set_auto_pause_threshold(env: &Env, admin: Address, threshold: u32) -> Result<(), Error> {
     require_admin_auth(env, &admin)?;
+    if threshold == 0 {
+        return Err(Error::InvalidInput);
+    }
     env.storage()
         .instance()
         .set(&DataKey::AutoPauseThreshold, &threshold);

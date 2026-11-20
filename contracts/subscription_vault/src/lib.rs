@@ -1850,11 +1850,16 @@ impl SubscriptionVault {
             return Err(Error::InvalidInput);
         }
         let mut total_weight: u32 = 0;
+        let mut seen_payees = Vec::new(&env);
         for entry in entries.iter() {
             let (payee, weight) = entry;
             if weight == 0 {
                 return Err(Error::InvalidInput);
             }
+            if seen_payees.contains(&payee) {
+                return Err(Error::DuplicateSplitPayee);
+            }
+            seen_payees.push_back(payee.clone());
             total_weight = total_weight
                 .checked_add(weight)
                 .ok_or(Error::InvalidInput)?;
@@ -1930,11 +1935,16 @@ impl SubscriptionVault {
                 return Err(Error::InvalidInput);
             }
             let mut total_weight: u32 = 0;
+            let mut seen_payees = Vec::new(&env);
             for entry in list.iter() {
                 let (payee, weight) = entry;
                 if weight == 0 {
                     return Err(Error::InvalidInput);
                 }
+                if seen_payees.contains(&payee) {
+                    return Err(Error::DuplicateSplitPayee);
+                }
+                seen_payees.push_back(payee.clone());
                 total_weight = total_weight
                     .checked_add(weight)
                     .ok_or(Error::InvalidInput)?;

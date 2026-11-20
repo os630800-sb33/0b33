@@ -406,6 +406,9 @@ pub enum DataKey {
     /// Secondary index: (subscriber, token) pairs that have a credit limit
     /// under a given merchant. Used by `list_credit_limits`. Discriminant 86.
     MerchantCreditLimits(Address),
+    /// Global requirement that merchants have active KYC before receiving charges.
+    /// Discriminant 87.
+    KycRequired,
 }
 
 impl DataKey {
@@ -503,6 +506,7 @@ impl DataKey {
             DataKey::DisputeWindowSecs => 84,
             DataKey::IdempotencyTtlSecs => 85,
             DataKey::MerchantCreditLimits(_) => 86,
+            DataKey::KycRequired => 87,
         }
     }
 
@@ -580,6 +584,7 @@ pub const KNOWN_INSTANCE_KEY_DISCRIMINANTS: &[u32] = &[
     83, // MerchantSubAccountList(Address)
     84, // DisputeWindowSecs
     86, // MerchantCreditLimits(Address)
+    87, // KycRequired
 ];
 
 /// Returns `true` if `discriminant` is a recognised instance-storage key.
@@ -1429,6 +1434,8 @@ pub enum Error {
     VacationActive = 4014,
     /// The subscription's plan has been deprecated and must be migrated before charging.
     PlanDeprecated = 4015,
+    /// The merchant does not have active KYC when KYC-required charging is enabled.
+    KycRequired = 4016,
 
     // --- Accounting (5000-5099) ---
     /// Insufficient balance in the subscription vault.
@@ -1534,6 +1541,8 @@ pub enum Error {
     // --- Subscription Update (9000-9099) ---
     /// Attempting to change usage_enabled on an existing subscription is not allowed.
     CannotChangeUsageMode = 9001,
+    /// The same address appears more than once in a split-payee configuration.
+    DuplicateSplitPayee = 9002,
 
     // --- Schema Migration (9100-9199) ---
     /// Stored schema version is newer than the binary's STORAGE_VERSION; downgrade rejected.

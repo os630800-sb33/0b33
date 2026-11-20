@@ -29,7 +29,8 @@ use crate::types::{
     MerchantWhitelistModeEvent, MerchantWithdrawalEvent, PayoutSchedule,
     PayoutScheduleCheckedEvent, PayoutCheckReason, PlanDeprecatedEvent,
     PlanRegisteredEvent, PlanTemplate, ScheduledPayoutEvent, TokenEarnings,
-    TokenReconciliationSnapshot, VacationEndedEvent, VacationStartedEvent, MAX_FEE_BIPS,
+    TokenReconciliationSnapshot, VacationEndedEvent, VacationStartedEvent, KycKey,
+    MerchantKyc, MAX_FEE_BIPS,
     is_valid_allowed_operations, OP_CHARGE, TOPIC_WITHDRAWN,
 };
 use soroban_sdk::{token, Address, Env, String, Symbol, Vec};
@@ -140,6 +141,28 @@ pub fn get_merchant_paused(env: &Env, merchant: Address) -> bool {
 pub fn set_merchant_paused(env: &Env, merchant: Address, paused: bool) {
     let key = DataKey::MerchantPaused(merchant);
     env.storage().instance().set(&key, &paused);
+}
+
+/// Returns whether global merchant KYC is required for charges.
+pub fn is_kyc_required(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::KycRequired)
+        .unwrap_or(false)
+}
+
+/// Rejects a charge to a merchant without an active KYC attestation when
+/// global KYC-required charging is enabled.
+pub fn require_active_merchant_kyc(env: &Env, merchant: &Address) -> Result<(), Error> {
+    if !is_kyc_required(env) {
+        return Ok(());
+    }
+
+    let key = DataKey::Kyc(KycKey::MerchantStatus(merchant.clone()));
+    match env.storage().instance().get::<_, MerchantKyc>(&key) {
+        Some(kyc) if kyc.status => Ok(()),
+        _ => Err(Error::KycRequired),
+    }
 }
 
 pub fn pause_merchant(env: &Env, merchant: Address) -> Result<(), Error> {

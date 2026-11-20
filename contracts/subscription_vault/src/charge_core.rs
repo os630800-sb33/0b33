@@ -217,6 +217,9 @@ pub fn charge_one(
     let mut sub = get_subscription(env, subscription_id)
         .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
 
+    crate::merchant::require_active_merchant_kyc(env, &sub.merchant)
+        .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
+
     // A subscription with amount == 0 must never produce a charge event.
     // Zero-amount subscriptions yield no-op accounting entries, pollute event
     // streams with phantom SubscriptionChargedEvents, and consume storage
@@ -304,6 +307,8 @@ pub fn charge_one(
     if let Some(split_payees) = crate::subscription::get_split_payees(env, subscription_id) {
         for entry in split_payees.entries.iter() {
             let (payee, _) = entry;
+            crate::merchant::require_active_merchant_kyc(env, &payee)
+                .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
             crate::blocklist::require_not_blocklisted(env, &payee)
                 .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
             if crate::merchant::get_merchant_paused(env, payee.clone()) {
@@ -1053,6 +1058,9 @@ pub fn charge_usage_one(
         .map_err(|e| charge_fail(env, subscription_id, e, 0, env.ledger().timestamp()))?;
     let merchant = sub.merchant.clone();
 
+    crate::merchant::require_active_merchant_kyc(env, &merchant)
+        .map_err(|e| charge_fail(env, subscription_id, e, 0, env.ledger().timestamp()))?;
+
     if crate::merchant::get_merchant_paused(env, merchant.clone()) {
         return Err(charge_fail(
             env,
@@ -1085,6 +1093,8 @@ pub fn charge_usage_one(
     if let Some(split_payees) = crate::subscription::get_split_payees(env, subscription_id) {
         for entry in split_payees.entries.iter() {
             let (payee, _) = entry;
+            crate::merchant::require_active_merchant_kyc(env, &payee)
+                .map_err(|e| charge_fail(env, subscription_id, e, 0, env.ledger().timestamp()))?;
             crate::blocklist::require_not_blocklisted(env, &payee)
                 .map_err(|e| charge_fail(env, subscription_id, e, 0, env.ledger().timestamp()))?;
             if crate::merchant::get_merchant_paused(env, payee.clone()) {
