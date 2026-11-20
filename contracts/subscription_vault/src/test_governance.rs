@@ -28,7 +28,7 @@ fn admin_rotation_invalidates_old_governance_proposals() {
 		&admin,
 		&None::<Address>,
 		&1u32,
-		&5_000u32,
+		&6_700u32,
 		&old_eta,
 	);
 	client.vote_proposal(&stale_id, &true, &0u64);
@@ -50,7 +50,7 @@ fn admin_rotation_invalidates_old_governance_proposals() {
 		&new_admin,
 		&None::<Address>,
 		&1u32,
-		&5_000u32,
+		&6_700u32,
 		&fresh_eta,
 	);
 	client.vote_proposal(&fresh_id, &true, &0u64);
@@ -83,7 +83,7 @@ fn direct_admin_rotation_invalidates_outstanding_proposals() {
 		&admin,
 		&None::<Address>,
 		&1u32,
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -151,7 +151,7 @@ fn set_protocol_fee_proposal_rejects_fee_too_high() {
 		&admin,
 		&Some(treasury),
 		&(MAX_PROTOCOL_FEE_BIPS + 1),
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -178,7 +178,7 @@ fn set_protocol_fee_proposal_rejects_missing_treasury() {
 		&admin,
 		&None::<Address>,
 		&250u32, // Valid fee (5%)
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -206,7 +206,7 @@ fn set_protocol_fee_proposal_accepts_valid_config() {
 		&admin,
 		&Some(treasury),
 		&MAX_PROTOCOL_FEE_BIPS,
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -235,7 +235,7 @@ fn set_dispute_window_proposal_rejects_zero_window() {
 		&admin,
 		&None::<Address>,
 		&0u32,
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -262,7 +262,7 @@ fn set_dispute_window_proposal_rejects_max_u32_window() {
 		&admin,
 		&None::<Address>,
 		&u32::MAX,
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -289,7 +289,7 @@ fn set_dispute_window_proposal_accepts_valid_config() {
 		&admin,
 		&None::<Address>,
 		&3_600u32,
-		&5_000u32,
+		&6_700u32,
 		&eta,
 	);
 
@@ -675,7 +675,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -705,7 +705,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -738,7 +738,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -778,7 +778,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000, // 50% quorum needed
+            &6_700, // 67% quorum
             &eta,
         );
 
@@ -791,6 +791,56 @@ mod vote_lock_during_timelock {
         // Execute — must still succeed (quorum was met before lock)
         let result = client.try_execute_proposal(&proposal_id);
         assert!(result.is_ok(), "execution after timelock must still succeed");
+    }
+
+    #[test]
+    fn submit_proposal_rejects_quorum_below_minimum() {
+        // A quorum_bps below MIN_QUORUM_BPS (6700) must be rejected at submission
+        // time so that callers are never misled about the effective quorum.
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = init_vault(&env, &admin);
+        client.add_guardian(&admin, &admin, &100);
+
+        let eta = env.ledger().timestamp() + 3600;
+        let target = Address::generate(&env);
+
+        // Exact boundary: 6699 is one below the floor
+        let result = client.try_submit_proposal(
+            &ProposalKind::RotateAdmin,
+            &target,
+            &None,
+            &0,
+            &6_699,
+            &eta,
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidInput)),
+            "quorum_bps = 6699 must be rejected (below MIN_QUORUM_BPS)");
+
+        // Zero is also rejected
+        let result = client.try_submit_proposal(
+            &ProposalKind::RotateAdmin,
+            &target,
+            &None,
+            &0,
+            &0,
+            &eta,
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidInput)),
+            "quorum_bps = 0 must be rejected");
+
+        // Exact floor is accepted
+        let result = client.try_submit_proposal(
+            &ProposalKind::RotateAdmin,
+            &target,
+            &None,
+            &0,
+            &6_700,
+            &eta,
+        );
+        assert!(result.is_ok(), "quorum_bps = 6700 (MIN_QUORUM_BPS) must be accepted");
     }
 
     #[test]
@@ -812,7 +862,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -846,7 +896,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -880,7 +930,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -914,7 +964,7 @@ mod vote_lock_during_timelock {
             &target,
             &None,
             &0,
-            &5000,
+            &6_700,
             &eta,
         );
 
@@ -1245,7 +1295,7 @@ mod cancel_proposal_authorisation {
             &target,
             &None,
             &1u32,
-            &5_000u32,
+            &6_700u32,
             &eta,
         )
     }

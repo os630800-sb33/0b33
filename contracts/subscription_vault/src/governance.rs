@@ -22,17 +22,13 @@ use soroban_sdk::{Address, Env, Map, String, Symbol, Vec};
 /// Prevents immediate execution in the same ledger and ensures a minimum review window.
 const MIN_TIMELOCK_DELAY: u64 = 2 * 24 * 60 * 60; // 172800 seconds
 
-/// Floor applied to `quorum_bps` when a proposal is executed.
+/// Minimum `quorum_bps` required when a proposal is submitted.
 ///
-/// [`do_submit_proposal`] only rejects `quorum_bps > 10_000`, so a proposal can
-/// legally be created with `quorum_bps = 0`. Without a floor that would let a
-/// single guardian vote execute a privileged operation such as admin rotation
-/// or a treasury change. Execution therefore uses
-/// `proposal.quorum_bps.max(MIN_QUORUM_BPS)`, so the effective quorum can never
-/// fall below two thirds of the current total guardian weight.
-///
-/// 6 700 bps (67%) is the quorum used by every worked example in
-/// `docs/governance_proposals.md`.
+/// [`do_submit_proposal`] rejects any `quorum_bps` below this value, ensuring
+/// that the stated quorum and the enforced quorum are always identical. A floor
+/// of 6 700 bps (67%) matches the two-thirds supermajority used throughout
+/// `docs/governance_proposals.md` and prevents single-guardian execution of
+/// privileged operations such as admin rotation or treasury changes.
 const MIN_QUORUM_BPS: u32 = 6_700;
 
 fn proposal_invalidation_cutoff_key(env: &Env) -> Symbol {
@@ -189,7 +185,7 @@ fn validate_proposal_config(
 ///
 /// # Errors
 /// - `Unauthorized` if the caller is not a guardian with weight > 0.
-/// - `InvalidInput` if quorum_bps is invalid (> 10000).
+/// - `InvalidInput` if quorum_bps is below `MIN_QUORUM_BPS` (6700) or above 10000.
 /// - `InvalidInput` if eta does not satisfy: eta >= created_at + MIN_TIMELOCK_DELAY.
 /// - `EmergencyStopActive` if emergency stop is enabled.
 pub fn do_submit_proposal(
@@ -201,7 +197,7 @@ pub fn do_submit_proposal(
     quorum_bps: u32,
     eta: u64,
 ) -> Result<u64, Error> {
-    if quorum_bps > 10_000 {
+    if quorum_bps < MIN_QUORUM_BPS || quorum_bps > 10_000 {
         return Err(Error::InvalidInput);
     }
     if kind == ProposalKind::SetDisputeWindow && target3 == 0 {

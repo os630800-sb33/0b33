@@ -27,6 +27,7 @@
 //! | `get_plan_max_active_subs` | Per-plan active-subscription limit | ✅ Yes | None |
 //! | `get_merchant_max_subs` | Per-merchant active-subscription limit | ✅ Yes | None |
 //! | `list_subscriptions_by_subscriber` | Paginated subscription IDs | ✅ Yes | None |
+//! | `get_subscriptions_by_subscriber` | Slice of subscription records | ✅ Yes | None |
 //! | `list_recoverable_subscriptions` | Paginated stranded (cancelled + non-zero prepaid) subscriptions | ✅ Yes | None |
 //! | `get_token_reconciliation` | Accounting totals for a token (no secrets) | ✅ Yes | None — balance totals are public; no admin credential exposed |
 //! | `get_contract_reconciliation_summary` | Multi-token accounting summaries | ✅ Yes | None |
@@ -92,6 +93,10 @@
 //! - **`list_subscriptions_by_token`**: Cursor-based traversal of the same token index in
 //!   insertion order. `cursor` is a 0-based offset (`None` starts at the beginning); continue
 //!   with `next_cursor`. The returned `total` is the token index length.
+//! - **`get_subscriptions_by_subscriber`**: Backed by the `SubscriberSubs` secondary index
+//!   (insertion order, ascending id). `offset` is a 0-based offset into the subscriber's id
+//!   list. Returns full `Subscription` records for the requested slice. Missing records are
+//!   skipped silently.
 //!
 //! ## Read complexity per endpoint
 //!
@@ -109,6 +114,7 @@
 //! | `get_cap_info` | 1 | Calls `get_subscription` |
 //! | `get_plan_max_active_subs` | 1 | Direct key lookup |
 //! | `list_subscriptions_by_subscriber` | 1 + up to MAX_SCAN_DEPTH | 1 index read + capped scan of that subscriber's ids |
+//! | `get_subscriptions_by_subscriber` | 1 + limit | 1 index read + up to `limit` sub reads |
 //! | `list_recoverable_subscriptions` | up to MAX_SCAN_DEPTH | Capped full-ID scan; cancelled subs are absent from every secondary index |
 //!
 //! **Index deserialization note**: merchant and token subscription queries read the
@@ -612,6 +618,62 @@ pub fn list_subscriptions_by_subscriber(
         subscription_ids,
         next_start_id,
     })
+}
+
+/// Returns full subscription records for a given subscriber with offset-based pagination.
+///
+/// Backed by the `SubscriberSubs` secondary index (insertion order, ascending id).
+/// At most [`MAX_SUBSCRIPTION_LIST_PAGE`] records are returned per call.
+///
+/// # Arguments
+///
+/// - `subscriber`: the subscriber address whose subscriptions to fetch.
+/// - `offset`: 0-based offset into the subscriber's index list.
+/// - `limit`: number of records to return; must be in `1..=MAX_SUBSCRIPTION_LIST_PAGE`.
+///
+/// # Returns
+///
+/// A `Vec<Subscription>` slice. Returns an empty vector when `offset` is at or
+/// beyond the end of the subscriber's index. Missing subscription records (deleted
+/// or not yet written) are silently skipped, so the returned slice may be shorter
+/// than `limit` even when more index entries exist.
+///
+/// # Errors
+///
+/// - `InvalidInput` if `limit` is 0 or exceeds `MAX_SUBSCRIPTION_LIST_PAGE`.
+///
+/// ## Complexity
+///
+/// 1 index read + up to `limit` subscription reads.
+pub fn get_subscriptions_by_subscriber(
+    env: &Env,
+    subscriber: Address,
+    offset: u32,
+    limit: u32,
+) -> Result<Vec<Subscription>, Error> {
+    if limit == 0 || limit > MAX_SUBSCRIPTION_LIST_PAGE {
+        return Err(Error::InvalidInput);
+    }
+
+    let ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&DataKey::SubscriberSubs(subscriber))
+        .unwrap_or(Vec::new(env));
+
+    let len = ids.len();
+    if offset >= len {
+        return Ok(Vec::new(env));
+    }
+
+    let end = (offset + limit).min(len);
+    let mut out = Vec::new(env);
+    for id in ids.iter().skip(offset as usize).take((end - offset) as usize) {
+        if let Some(sub) = read_subscription(env, id) {
+            out.push_back(sub);
+        }
+    }
+    Ok(out)
 }
 
 /// One entry of a [`RecoverableSubscriptionsPage`] page.
