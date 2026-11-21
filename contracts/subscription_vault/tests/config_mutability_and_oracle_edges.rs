@@ -312,3 +312,51 @@ fn oracle_disabled_returns_amount_unchanged() {
     assert_ne!(res, 0, "charge should have moved funds");
     assert!(TokenClient::new(&env, &token_addr).balance(&subscriber) < 50_000_000);
 }
+
+#[test]
+fn oracle_address_change_requires_and_consumes_governance_proposal() {
+    let (env, client, _token, admin) = setup();
+    client.add_guardian(&admin, &admin, &100u32);
+
+    let oracle = Address::generate(&env);
+    assert_eq!(
+        client.try_set_oracle_config(
+            &admin,
+            &true,
+            &Some(oracle.clone()),
+            &300u64,
+            &subscription_vault::OracleKind::Spot,
+            &0u64,
+            &0u128,
+            &1u128,
+        ),
+        Err(Ok(subscription_vault::Error::MultiSigProposalNotFound))
+    );
+    assert_eq!(client.get_oracle_config().oracle, None);
+
+    let eta = env.ledger().timestamp() + 3 * 24 * 60 * 60;
+    let proposal_id = client.submit_proposal(
+        &subscription_vault::ProposalKind::SetOracleConfig,
+        &oracle,
+        &None,
+        &0,
+        &6_700,
+        &eta,
+    );
+    client.vote_proposal(&proposal_id, &true, &0u64);
+    env.ledger().set_timestamp(eta);
+
+    client.set_oracle_config(
+        &admin,
+        &true,
+        &Some(oracle.clone()),
+        &300u64,
+        &subscription_vault::OracleKind::Spot,
+        &0u64,
+        &0u128,
+        &1u128,
+    );
+
+    assert_eq!(client.get_oracle_config().oracle, Some(oracle));
+    assert!(client.get_proposal(&proposal_id).executed);
+}

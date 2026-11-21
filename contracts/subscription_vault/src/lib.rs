@@ -1155,15 +1155,23 @@ impl SubscriptionVault {
     ) -> Result<(), Error> {
         admin::require_admin_auth(&env, &admin)?;
         
-        // If oracle address is being changed (set or disabled), require governance
+        // `None` preserves the current oracle address; only a different address
+        // requires a governance proposal.
         let current_config = crate::oracle::get_oracle_config(&env);
-        let oracle_address_changing = current_config.oracle != oracle;
-        
-        if oracle_address_changing {
-            return Err(Error::GovernanceRequired);
+        if let Some(new_oracle) = oracle.as_ref() {
+            if current_config.oracle.as_ref() != Some(new_oracle) {
+                let proposal_id = admin::require_multisig_approval(
+                    &env,
+                    crate::types::ProposalKind::SetOracleConfig,
+                    new_oracle,
+                    None,
+                    0,
+                )?;
+                admin::consume_multisig_proposal(&env, proposal_id)?;
+            }
         }
         
-        // Oracle address is not changing, proceed with regular update (with cooldown)
+        // Proceed with regular parameter updates (with cooldown).
         crate::oracle::set_oracle_config_except_address(
             &env,
             enabled,
