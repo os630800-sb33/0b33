@@ -2381,6 +2381,85 @@ fn test_batch_charge_matches_single_charge_semantics_for_identical_inputs() {
         );
     }
 }
+#[test]
+fn test_batch_charge_respects_emergency_stop_during_execution() {
+    let test_env = TestEnv::default();
+    test_env.set_timestamp(T0);
+
+    // Create 5 subscriptions, all with sufficient balance
+    let mut ids = Vec::new(&test_env.env);
+    for _ in 0..5 {
+        let (id, _, _) = fixtures::create_subscription_detailed(
+            &test_env.env,
+            &test_env.client,
+            SubscriptionStatus::Active,
+            AMOUNT,
+            INTERVAL,
+        );
+        fixtures::seed_balance(&test_env.env, &test_env.client, id, PREPAID);
+        ids.push_back(id);
+    }
+
+    test_env.jump(INTERVAL + 1);
+
+    // Charge the batch normally - should all succeed
+    let results_before = test_env.client.batch_charge(&ids, &0u64);
+    assert_eq!(results_before.len(), 5);
+    for i in 0..5 {
+        assert!(results_before.get(i).unwrap().success, "subscription {} should charge successfully", i);
+    }
+
+    // Recreate all subscriptions for a second batch
+    test_env.set_timestamp(T0);
+    let mut ids2 = Vec::new(&test_env.env);
+    for _ in 0..5 {
+        let (id, _, _) = fixtures::create_subscription_detailed(
+            &test_env.env,
+            &test_env.client,
+            SubscriptionStatus::Active,
+            AMOUNT,
+            INTERVAL,
+        );
+        fixtures::seed_balance(&test_env.env, &test_env.client, id, PREPAID);
+        ids2.push_back(id);
+    }
+
+    test_env.jump(INTERVAL + 1);
+
+    // Enable emergency stop
+    test_env.client.enable_emergency_stop(&test_env.admin);
+
+    // Batch charge should fail for all due to emergency stop
+    let results_after = test_env.client.batch_charge(&ids2, &0u64);
+    assert_eq!(results_after.len(), 5);
+    for i in 0..5 {
+        assert!(
+            !results_after.get(i).unwrap().success,
+            "subscription {} should fail due to emergency stop",
+            i
+        );
+        assert_eq!(
+            results_after.get(i).unwrap().error_code,
+            Error::EmergencyStopActive as u32,
+            "error code should be EmergencyStopActive"
+        );
+    }
+
+    // Disable emergency stop
+    test_env.env.ledger().with_mut(|li| li.timestamp += crate::admin::CONFIG_COOLDOWN_SECS);
+    test_env.client.disable_emergency_stop(&test_env.admin);
+
+    // Now batch charge should succeed
+    let results_after_disable = test_env.client.batch_charge(&ids2, &1u64);
+    assert_eq!(results_after_disable.len(), 5);
+    for i in 0..5 {
+        assert!(
+            results_after_disable.get(i).unwrap().success,
+            "subscription {} should charge after emergency stop disabled",
+            i
+        );
+    }
+}
 
 #[test]
 fn test_batch_charge_mixed_results_preserve_single_path_order_and_error_codes() {

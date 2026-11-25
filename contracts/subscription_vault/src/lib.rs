@@ -741,7 +741,8 @@ pub mod operator {
     ) -> Result<ChargeExecutionResult, Error> {
         require_operator_auth(env, &op)?;
         let now = env.ledger().timestamp();
-        crate::charge_core::charge_one(env, subscription_id, now, None, None, None)
+        let emergency_stop_active = crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
+        crate::charge_core::charge_one(env, subscription_id, now, None, None, None, emergency_stop_active)
     }
 
     pub fn do_operator_charge_usage(
@@ -751,11 +752,13 @@ pub mod operator {
         usage_amount: i128,
     ) -> Result<UsageChargeResult, Error> {
         require_operator_auth(env, &op)?;
+        let emergency_stop_active = crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
         crate::charge_core::charge_usage_one(
             env,
             subscription_id,
             usage_amount,
             String::from_str(env, ""),
+            emergency_stop_active,
         )
     }
 
@@ -767,7 +770,8 @@ pub mod operator {
         reference: String,
     ) -> Result<UsageChargeResult, Error> {
         require_operator_auth(env, &op)?;
-        crate::charge_core::charge_usage_one(env, subscription_id, usage_amount, reference)
+        let emergency_stop_active = crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
+        crate::charge_core::charge_usage_one(env, subscription_id, usage_amount, reference, emergency_stop_active)
     }
 }
 
@@ -2783,11 +2787,12 @@ impl SubscriptionVault {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "charge_subscription")?;
         let timestamp = env.ledger().timestamp();
+        let emergency_stop_active = crate::admin::read_config(&env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
         // `charge_core::charge_one` publishes the canonical `SubscriptionChargedEvent`
         // (with the correct post-fee net merchant amount) on the success path —
         // do not duplicate it here with a second, pre-fee-amount event.
         let result =
-            charge_core::charge_one(&env, subscription_id, timestamp, idem_key, None, None)?;
+            charge_core::charge_one(&env, subscription_id, timestamp, idem_key, None, None, emergency_stop_active)?;
         Ok(result)
     }
 
@@ -2799,11 +2804,13 @@ impl SubscriptionVault {
     ) -> Result<UsageChargeResult, Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "charge_usage")?;
+        let emergency_stop_active = crate::admin::read_config(&env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
         charge_core::charge_usage_one(
             &env,
             subscription_id,
             usage_amount,
             String::from_str(&env, "usage"),
+            emergency_stop_active,
         )
     }
 
@@ -2816,7 +2823,8 @@ impl SubscriptionVault {
     ) -> Result<UsageChargeResult, Error> {
         require_not_emergency_stop(&env)?;
         let _guard = crate::reentrancy::ReentrancyGuard::lock(&env, "charge_usage_with_reference")?;
-        charge_core::charge_usage_one(&env, subscription_id, usage_amount, reference)
+        let emergency_stop_active = crate::admin::read_config(&env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
+        charge_core::charge_usage_one(&env, subscription_id, usage_amount, reference, emergency_stop_active)
     }
 
     /// Configure usage limits.

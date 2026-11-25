@@ -652,10 +652,15 @@ pub(crate) fn execute_batch_charge(
     let now = env.ledger().timestamp();
     // Read all admin config values once so they are cached across the batch loop.
     let cached_admin = read_cached_admin_config(env);
+    // Read emergency-stop flag once to avoid per-subscription storage reads.
+    let emergency_stop_active = read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
     // Track IDs seen in this batch to reject duplicates before they hit storage.
     let mut seen: Map<u32, bool> = Map::new(env);
+    // Cache merchant pause/vacation status across subscriptions in the batch.
+    let mut merchant_cache: Map<Address, (bool, bool)> = Map::new(env);
     let mut results = Vec::new(env);
-    for id in subscription_ids.iter() {
+    
+    for (idx, id) in subscription_ids.iter().enumerate() {
         // Reject duplicate IDs within the same batch.  Without this guard a
         // caller could list the same subscription twice and charge it twice
         // inside a single transaction, bypassing the interval check because
@@ -679,7 +684,7 @@ pub(crate) fn execute_batch_charge(
         // `idx` (shorter keys vec) is silently treated as no key for that ID.
         let idem_key: Option<soroban_sdk::BytesN<32>> = idem_keys
             .and_then(|keys| keys.get(idx as u32));
-        let r = charge_one(env, id, now, idem_key, admin_ref, Some(&mut merchant_cache));
+        let r = charge_one(env, id, now, idem_key, admin_ref, Some(&mut merchant_cache), emergency_stop_active);
         let res = match r {
             Ok(ChargeExecutionResult::Charged) => BatchChargeResult {
                 subscription_id: id,
@@ -826,7 +831,8 @@ pub fn do_charge_subscription(
     let _admin = require_stored_admin_auth(env)?;
 
     let now = env.ledger().timestamp();
-    charge_one(env, subscription_id, now, None, None, None)
+    let emergency_stop_active = read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
+    charge_one(env, subscription_id, now, None, None, None, emergency_stop_active)
 }
 
 /// Performs a single usage-based charge. Admin only.
@@ -838,7 +844,8 @@ pub fn do_charge_usage(
 ) -> Result<(), Error> {
     let _admin = require_stored_admin_auth(env)?;
 
-    charge_usage_one(env, subscription_id, usage_amount, reference)?;
+    let emergency_stop_active = read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false);
+    charge_usage_one(env, subscription_id, usage_amount, reference, emergency_stop_active)?;
     Ok(())
 }
 

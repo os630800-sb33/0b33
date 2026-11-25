@@ -206,6 +206,9 @@ fn convert_fee(
 /// merchant across every subscription that shares it, instead of re-reading
 /// `DataKey::MerchantPaused`/`DataKey::MerchantVacation` from storage on
 /// every iteration. Pass `None` for single-subscription charge paths.
+///
+/// `emergency_stop_active` is cached once per batch call to avoid redundant
+/// storage reads. Single-charge paths should read it once and pass the value.
 pub fn charge_one(
     env: &Env,
     subscription_id: u32,
@@ -213,12 +216,14 @@ pub fn charge_one(
     idempotency_key: Option<soroban_sdk::BytesN<32>>,
     admin_config: Option<&crate::admin::CachedAdminConfig>,
     mut merchant_cache: Option<&mut soroban_sdk::Map<Address, (bool, bool)>>,
+    emergency_stop_active: bool,
 ) -> Result<ChargeExecutionResult, Error> {
     // ── CRITICAL: Atomic emergency stop check ────────────────────────────────
     // Re-check emergency stop on every iteration to prevent in-flight batch_charge
     // from completing when emergency_stop is triggered mid-execution.
     // This fixes the race condition where the flag is only checked at entry-point.
-    if crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false) {
+    // The flag is cached once per batch call to avoid redundant storage reads.
+    if emergency_stop_active {
         return Err(charge_fail(
             env,
             subscription_id,
@@ -1048,17 +1053,22 @@ pub fn charge_one(
 }
 
 /// Debit a metered `usage_amount` from a subscription's prepaid balance.
+///
+/// `emergency_stop_active` is cached to avoid redundant storage reads. Callers should
+/// read it once and pass the value to avoid per-subscription storage access.
 pub fn charge_usage_one(
     env: &Env,
     subscription_id: u32,
     usage_amount: i128,
     reference: String,
+    emergency_stop_active: bool,
 ) -> Result<UsageChargeResult, Error> {
     // ── CRITICAL: Atomic emergency stop check ────────────────────────────────
     // Re-check emergency stop on every iteration to prevent in-flight charging
     // operations from completing when emergency_stop is triggered mid-execution.
+    // The flag is cached once per batch call to avoid redundant storage reads.
     let now = env.ledger().timestamp();
-    if crate::admin::read_config(env, &crate::types::DataKey::EmergencyStop).unwrap_or(false) {
+    if emergency_stop_active {
         return Err(charge_fail(
             env,
             subscription_id,
